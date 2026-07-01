@@ -329,7 +329,7 @@ input,select,textarea{font-family:inherit; font-size:15px;}
 }
 </style>
 </head>
-<body>
+<body data-role="hq">
 
 <div class="topbar">
   <div class="brand">
@@ -396,16 +396,18 @@ input,select,textarea{font-family:inherit; font-size:15px;}
     <button class="row-action" id="btn-export-csv"><div class="icon">📊</div><div class="txt"><strong>Export all as CSV</strong><span>Open in Excel / Google Sheets</span></div><div class="chev">›</div></button>
   </div>
 
-  <div class="section-title">Receive data / restore</div>
-  <div class="card">
-    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Import a JSON file exported from this app on another device. Existing records are kept; matching IDs are updated.</p>
-    <label class="file-drop" for="import-file-input">
-      <div style="font-size:26px; margin-bottom:6px;">📥</div>
-      <div><strong>Tap to choose a .json file</strong></div>
-      <div class="hint">Only files exported from this app</div>
-      <input type="file" id="import-file-input" accept="application/json,.json">
-    </label>
-    <div id="import-log" class="import-log" hidden></div>
+  <div id="import-section">
+    <div class="section-title">Receive data / restore</div>
+    <div class="card">
+      <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Import a JSON file exported from this app on another device. Existing records are kept; matching IDs are updated.</p>
+      <label class="file-drop" for="import-file-input">
+        <div style="font-size:26px; margin-bottom:6px;">📥</div>
+        <div><strong>Tap to choose a .json file</strong></div>
+        <div class="hint">Only files exported from this app</div>
+        <input type="file" id="import-file-input" accept="application/json,.json">
+      </label>
+      <div id="import-log" class="import-log" hidden></div>
+    </div>
   </div>
 
   <div class="section-title">Device data</div>
