@@ -5,6 +5,7 @@
 
 const STORAGE_KEY = 'enb_msme_records_v1';
 const DRAFT_KEY = 'enb_msme_draft_v1';
+const APP_ROLE = (document.body && document.body.dataset.role) || 'hq'; // 'hq' | 'enumerator'
 const DISTRICTS = ['Gazelle', 'Kokopo', 'Pomio', 'Rabaul'];
 
 const BUSINESS_ACTIVITIES = {
@@ -936,6 +937,10 @@ function setOfflineStatus(ready, note) {
 }
 
 /* -------------------------------- boot -------------------------------- */
+if (APP_ROLE === 'enumerator') {
+  const importSection = document.getElementById('import-section');
+  if (importSection) importSection.remove();
+}
 if ('serviceWorker' in navigator) {
   setOfflineStatus(false);
   if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
