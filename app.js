@@ -3,12 +3,15 @@
    All data lives in localStorage on this device. No network calls, ever.
    ========================================================================= */
 
-const STORAGE_KEY = 'enb_msme_records_v1';
+const STORAGE_KEY = 'enb_msme_draft_cache_v1'; // local draft-only cache now, not the source of truth
 const DRAFT_KEY = 'enb_msme_draft_v1';
-const VAULT_META_KEY = 'enb_msme_vault_meta_v1';
-const PBKDF2_ITERATIONS = 150000;
 const APP_ROLE = (document.body && document.body.dataset.role) || 'hq'; // 'hq' | 'enumerator'
 const DISTRICTS = ['Gazelle', 'Kokopo', 'Pomio', 'Rabaul'];
+
+// Supabase project: tulezready's enb-msme-survey
+const SUPABASE_URL = 'https://lgfdzxcawggxrqvsgzpz.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_cX_rXW51KpL-k9arZupk9w_6MS9Jlo_';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const BUSINESS_ACTIVITIES = {
   general: { label: 'Commerce & Services', items: ['Trade store','Wholesale','Fast food outlet','Second hand clothing shop','Liquor / Bottle shop','Bakery','Service station','PMV / Transport / Taxi services','Pest Control','Professional services (accountancy/consultancy)','Tailoring','Coffin Making','Mechanical Workshop','Contracting services','Communication Towers'] },
@@ -44,75 +47,55 @@ function stepsForStatus(status) {
   return ['A', 'B', 'F', 'REVIEW'];
 }
 
-/* ---------------------------- crypto layer ----------------------------
-   Records are encrypted at rest with AES-256-GCM. The key is derived from
-   the device PIN via PBKDF2 and only ever kept in memory (cryptoKey) —
-   it is never written to storage. Nothing here ever leaves the device;
-   there's still no network call anywhere in this app. */
-let cryptoKey = null; // CryptoKey, set only after a correct PIN is entered this session
-
-function bytesToBase64(bytes) {
-  let binary = '';
-  bytes.forEach(b => binary += String.fromCharCode(b));
-  return btoa(binary);
-}
-function base64ToBytes(b64) {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-async function deriveKey(pin, saltB64, iterations) {
-  const enc = new TextEncoder();
-  const salt = base64ToBytes(saltB64);
-  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(pin), { name: 'PBKDF2' }, false, ['deriveKey']);
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
-    keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-  );
-}
-async function encryptJSON(key, obj) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = new TextEncoder().encode(JSON.stringify(obj));
-  const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
-  return { iv: bytesToBase64(iv), ct: bytesToBase64(new Uint8Array(ctBuf)) };
-}
-async function decryptJSON(key, envelope) {
-  const iv = base64ToBytes(envelope.iv);
-  const ctBytes = base64ToBytes(envelope.ct);
-  const ptBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ctBytes);
-  return JSON.parse(new TextDecoder().decode(ptBuf));
-}
-
 /* ---------------------------- storage layer ----------------------------
-   recordsCache is the live, decrypted, in-memory source of truth for
-   everything the UI renders — it's kept in sync on every write, so all
-   existing synchronous reads throughout the app keep working unchanged.
-   persistRecords()/persistDraft() do the actual (async) encrypted write. */
+   recordsCache is the live, in-memory source of truth for everything the
+   UI renders — kept in sync on every write so existing synchronous reads
+   throughout the app keep working unchanged. saveRecords() pushes the
+   whole current array to Supabase (upsert by id) — fine at this scale.
+   Deletions go through deleteRecordRemote() explicitly, since upsert alone
+   can't remove rows. Drafts stay local-only (plain, unsynced) — they're
+   just in-progress wizard state, not part of the shared dataset. */
 function loadRecords() { return recordsCache; }
+
 function saveRecords(records) {
   recordsCache = records;
-  persistRecords(records).catch(err => { console.error('Save failed:', err); toast('Could not save — try again'); });
+  persistRecords(records).catch(err => { console.error('Save failed:', err); toast('Could not save to the database — check your connection'); });
 }
 async function persistRecords(records) {
-  if (!cryptoKey) return;
-  const envelope = await encryptJSON(cryptoKey, records);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
+  if (records.length === 0) return;
+  const rows = records.map(recordToRow);
+  const { error } = await sb.from('msme_records').upsert(rows, { onConflict: 'id' });
+  if (error) throw error;
 }
+function recordToRow(r) {
+  return {
+    id: r.id,
+    district: r.location.district || null,
+    llg: r.location.llg || null,
+    village: r.location.village || null,
+    ward: r.location.ward || null,
+    household_no: r.location.householdNo || null,
+    business_status: r.businessStatus || null,
+    date_collected: r.location.dateCollected || null,
+    data: r
+  };
+}
+async function deleteRecordRemote(id) {
+  const { error } = await sb.from('msme_records').delete().eq('id', id);
+  if (error) throw error;
+}
+async function fetchAllRecords() {
+  const { data, error } = await sb.from('msme_records').select('data').order('updated_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(row => row.data);
+}
+
 function saveDraft(d) {
-  persistDraft(d).catch(err => console.error('Draft save failed:', err));
-}
-async function persistDraft(d) {
-  if (!cryptoKey) return;
-  if (d == null) { localStorage.removeItem(DRAFT_KEY); return; }
-  const envelope = await encryptJSON(cryptoKey, d);
-  localStorage.setItem(DRAFT_KEY, JSON.stringify(envelope));
+  try { d == null ? localStorage.removeItem(DRAFT_KEY) : localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); }
+  catch (e) { console.error('Draft save failed:', e); }
 }
 async function readDraft() {
-  if (!cryptoKey) return null;
-  const raw = localStorage.getItem(DRAFT_KEY);
-  if (!raw) return null;
-  try { return await decryptJSON(cryptoKey, JSON.parse(raw)); }
+  try { const raw = localStorage.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) : null; }
   catch (e) { return null; }
 }
 function clearDraft() { localStorage.removeItem(DRAFT_KEY); }
@@ -470,9 +453,9 @@ function openDetail(id) {
   $('#btn-detail-edit').onclick = () => editRecord(r.id);
   $('#btn-detail-back').onclick = () => switchView('records');
   $('#btn-detail-delete').onclick = () => {
-    if (confirm('Delete this record from this device? This cannot be undone.')) {
-      recordsCache = loadRecords().filter(x => x.id !== r.id);
-      saveRecords(recordsCache);
+    if (confirm('Delete this record from the database? This cannot be undone and affects everyone using HQ.')) {
+      recordsCache = recordsCache.filter(x => x.id !== r.id);
+      deleteRecordRemote(r.id).catch(err => { console.error(err); toast('Could not delete — check your connection'); });
       toast('Record deleted');
       switchView('records');
     }
@@ -970,14 +953,23 @@ function saveDraftRecord() {
 }
 
 /* -------------------------------- transfer -------------------------------- */
-function renderTransfer() {
+async function renderTransfer() {
   recordsCache = loadRecords();
   $('#transfer-record-count').textContent = recordsCache.length;
   const bytes = new Blob([JSON.stringify(recordsCache)]).size;
   $('#transfer-storage-size').textContent = bytes > 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(2) + ' MB' : Math.ceil(bytes / 1024) + ' KB';
+  const { data: { user } } = await sb.auth.getUser();
+  const emailEl = $('#account-email');
+  if (emailEl) emailEl.textContent = user ? user.email : '—';
 }
-$('#btn-lock-device').addEventListener('click', lockDevice);
-$('#btn-change-pin').addEventListener('click', changePin);
+$('#btn-sign-out').addEventListener('click', async () => {
+  await sb.auth.signOut();
+  recordsCache = [];
+  draft = null;
+  $('#lock-screen').hidden = false;
+  document.body.classList.add('locked');
+  renderLoginForm();
+});
 $('#btn-export-json').addEventListener('click', () => {
   const all = loadRecords();
   if (all.length === 0) { toast('No records to export yet'); return; }
@@ -1060,11 +1052,12 @@ function downloadFile(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-$('#import-file-input').addEventListener('change', (e) => {
+$('#import-file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
+    const log = $('#import-log');
     try {
       const data = JSON.parse(reader.result);
       let incoming;
@@ -1078,8 +1071,8 @@ $('#import-file-input').addEventListener('change', (e) => {
         incoming = [];
       }
       if (!Array.isArray(incoming) || incoming.length === 0) throw new Error('No records found in file');
-      let existing = loadRecords();
-      const existingIds = new Set(existing.map(r => r.id));
+
+      let existing = loadRecords().slice();
       let added = 0, updated = 0;
       incoming.forEach(rec => {
         if (!rec.id) return;
@@ -1087,34 +1080,23 @@ $('#import-file-input').addEventListener('change', (e) => {
         if (idx >= 0) { existing[idx] = rec; updated++; }
         else { existing.push(rec); added++; }
       });
-      saveRecords(existing);
+
+      await persistRecords(incoming); // push just the new/changed rows to Supabase
       recordsCache = existing;
-      const log = $('#import-log');
+
       log.hidden = false;
-      log.textContent = `Import complete.\n${added} new record(s) added.\n${updated} existing record(s) updated.\nTotal on device: ${existing.length}`;
+      log.textContent = `Import complete.\n${added} new record(s) added.\n${updated} existing record(s) updated.\nTotal in database: ${existing.length}`;
       renderTransfer();
       toast('Import complete');
     } catch (err) {
-      const log = $('#import-log');
       log.hidden = false;
-      log.textContent = 'Import failed: ' + err.message + '\nMake sure this is a JSON file exported from this app.';
+      log.textContent = 'Import failed: ' + err.message + '\nMake sure this is a JSON file exported from the offline app, and that you have a connection.';
     }
     e.target.value = '';
   };
   reader.readAsText(file);
 });
 
-$('#btn-clear-all').addEventListener('click', () => {
-  if (confirm('This will permanently erase ALL survey records on this device. Make sure you have exported and sent them to HQ first. Continue?')) {
-    if (confirm('Are you absolutely sure? This cannot be undone.')) {
-      saveRecords([]);
-      clearDraft();
-      recordsCache = [];
-      toast('All records erased');
-      renderTransfer();
-    }
-  }
-});
 
 /* ---------------------------- offline readiness --------------------------- */
 let offlineReady = false;
@@ -1143,147 +1125,58 @@ function setOfflineStatus(ready, note) {
   }
 }
 
-/* ------------------------------- PIN lock screen ------------------------------- */
-function showLockError(msg) {
+/* ------------------------------- login screen ------------------------------- */
+function showLoginError(msg) {
   const el = $('#lock-error');
   if (el) el.textContent = msg || '';
 }
 
-function renderSetupForm(existingCount, legacyRecords) {
+function renderLoginForm() {
   const c = $('#lock-content');
   c.innerHTML = `
-    <h3>Secure this device</h3>
-    <p class="lock-desc">Set a PIN to encrypt the survey data stored on this device. Only someone with the PIN can open the app or read the data.</p>
-    ${existingCount > 0 ? `<div class="lock-warn">This device already has ${existingCount} record(s) saved. They'll be encrypted with the PIN you set now.</div>` : ''}
-    <div class="lock-warn">If you forget this PIN, the data on this device cannot be recovered — there is no reset. Write it down somewhere safe.</div>
-    <input type="password" inputmode="numeric" pattern="[0-9]*" id="pin-setup-1" placeholder="Choose a PIN (4–8 digits)" maxlength="8">
-    <input type="password" inputmode="numeric" pattern="[0-9]*" id="pin-setup-2" placeholder="Confirm PIN" maxlength="8">
+    <h3>HQ Sign In</h3>
+    <p class="lock-desc">Sign in with your ENB Commerce &amp; Industry account.</p>
+    <input type="email" id="login-email" placeholder="Email" autocomplete="username" style="width:100%; text-align:center; font-size:16px; letter-spacing:normal; padding:12px; border:1.5px solid var(--border); border-radius:10px; margin-bottom:10px;">
+    <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" style="width:100%; text-align:center; font-size:16px; letter-spacing:normal; padding:12px; border:1.5px solid var(--border); border-radius:10px; margin-bottom:10px;">
     <div class="lock-error" id="lock-error"></div>
-    <button class="btn btn-primary btn-full" id="btn-pin-setup">Secure this device</button>
+    <button class="btn btn-primary btn-full" id="btn-login">Sign in</button>
   `;
-  const submit = () => handleSetup($('#pin-setup-1').value, $('#pin-setup-2').value, legacyRecords);
-  $('#btn-pin-setup').addEventListener('click', submit);
-  $('#pin-setup-2').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  const submit = () => handleLogin($('#login-email').value.trim(), $('#login-password').value);
+  $('#btn-login').addEventListener('click', submit);
+  $('#login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  setTimeout(() => { const el = $('#login-email'); if (el) el.focus(); }, 50);
 }
 
-function renderUnlockForm() {
-  const c = $('#lock-content');
-  c.innerHTML = `
-    <h3>Enter PIN</h3>
-    <p class="lock-desc">This device's survey data is encrypted.</p>
-    <input type="password" inputmode="numeric" pattern="[0-9]*" id="pin-unlock" placeholder="PIN" maxlength="8">
-    <div class="lock-error" id="lock-error"></div>
-    <button class="btn btn-primary btn-full" id="btn-pin-unlock">Unlock</button>
-    <button type="button" class="lock-forgot" id="btn-forgot-pin">Forgot PIN? Erase this device's data</button>
-  `;
-  const submit = () => handleUnlock($('#pin-unlock').value);
-  $('#btn-pin-unlock').addEventListener('click', submit);
-  $('#pin-unlock').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  $('#btn-forgot-pin').addEventListener('click', handleForgotPin);
-  setTimeout(() => { const el = $('#pin-unlock'); if (el) el.focus(); }, 50);
+async function handleLogin(email, password) {
+  if (!email || !password) { showLoginError('Enter your email and password.'); return; }
+  showLoginError('');
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { showLoginError(error.message || 'Sign in failed.'); return; }
+  await finishLogin();
 }
 
-async function handleSetup(pin, confirmPin, legacyRecords) {
-  if (!/^\d{4,8}$/.test(pin)) { showLockError('PIN must be 4–8 digits.'); return; }
-  if (pin !== confirmPin) { showLockError('PINs do not match.'); return; }
-  showLockError('');
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const saltB64 = bytesToBase64(salt);
-  localStorage.setItem(VAULT_META_KEY, JSON.stringify({ salt: saltB64, iterations: PBKDF2_ITERATIONS, createdAt: new Date().toISOString() }));
-  cryptoKey = await deriveKey(pin, saltB64, PBKDF2_ITERATIONS);
-  recordsCache = legacyRecords || [];
-  await persistRecords(recordsCache);
-  finishUnlock();
-}
-
-async function handleUnlock(pin) {
-  if (!pin) { showLockError('Enter your PIN.'); return; }
-  let meta;
-  try { meta = JSON.parse(localStorage.getItem(VAULT_META_KEY)); } catch (e) { meta = null; }
-  if (!meta) { showLockError('Vault info missing on this device.'); return; }
-  showLockError('');
-  cryptoKey = await deriveKey(pin, meta.salt, meta.iterations);
-  const ok = await attemptUnlockWithKey();
-  if (!ok) showLockError('Incorrect PIN. Try again.');
-}
-
-async function attemptUnlockWithKey() {
+async function finishLogin() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    recordsCache = raw ? await decryptJSON(cryptoKey, JSON.parse(raw)) : [];
+    recordsCache = await fetchAllRecords();
   } catch (e) {
-    cryptoKey = null;
-    return false;
+    console.error('Failed to load records:', e);
+    showLoginError('Signed in, but could not load records — check your connection and try again.');
+    return;
   }
-  finishUnlock();
-  return true;
-}
-
-function finishUnlock() {
   $('#lock-screen').hidden = true;
   document.body.classList.remove('locked');
   renderDashboard();
 }
 
-function handleForgotPin() {
-  if (!confirm("This erases this device's PIN and ALL survey data stored on it — it can't be decrypted without the PIN anyway. This cannot be undone. Continue?")) return;
-  if (!confirm('Are you absolutely sure? All local records on this device will be permanently lost.')) return;
-  localStorage.removeItem(VAULT_META_KEY);
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(DRAFT_KEY);
-  cryptoKey = null;
-  recordsCache = [];
-  initLockScreen();
-}
-
-function lockDevice() {
-  cryptoKey = null;
-  recordsCache = [];
-  draft = null;
+async function initLockScreen() {
   $('#lock-screen').hidden = false;
   document.body.classList.add('locked');
-  renderUnlockForm();
-}
-
-async function changePin() {
-  let meta;
-  try { meta = JSON.parse(localStorage.getItem(VAULT_META_KEY)); } catch (e) { meta = null; }
-  if (!meta) { toast('No PIN set on this device yet'); return; }
-  const currentPin = prompt('Enter your current PIN:');
-  if (currentPin == null) return;
-  let testKey;
-  try {
-    testKey = await deriveKey(currentPin, meta.salt, meta.iterations);
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) await decryptJSON(testKey, JSON.parse(raw));
-  } catch (e) { toast('Current PIN is incorrect'); return; }
-  const newPin = prompt('Enter a new PIN (4–8 digits):');
-  if (newPin == null) return;
-  if (!/^\d{4,8}$/.test(newPin)) { toast('PIN must be 4–8 digits'); return; }
-  const confirmNew = prompt('Confirm new PIN:');
-  if (confirmNew !== newPin) { toast('PINs did not match — PIN not changed'); return; }
-  const newSalt = crypto.getRandomValues(new Uint8Array(16));
-  const newSaltB64 = bytesToBase64(newSalt);
-  cryptoKey = await deriveKey(newPin, newSaltB64, PBKDF2_ITERATIONS);
-  localStorage.setItem(VAULT_META_KEY, JSON.stringify({ salt: newSaltB64, iterations: PBKDF2_ITERATIONS, createdAt: meta.createdAt, changedAt: new Date().toISOString() }));
-  await persistRecords(recordsCache);
-  toast('PIN changed');
-}
-
-function initLockScreen() {
-  $('#lock-screen').hidden = false;
-  document.body.classList.add('locked');
-  const vaultMetaRaw = localStorage.getItem(VAULT_META_KEY);
-  let legacyRecords = null;
-  if (!vaultMetaRaw) {
-    // Device updated from a pre-PIN version — detect old plaintext records so setup can migrate them in, not discard them.
-    try {
-      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (Array.isArray(parsed)) legacyRecords = parsed;
-    } catch (e) {}
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    await finishLogin();
+  } else {
+    renderLoginForm();
   }
-  if (vaultMetaRaw) renderUnlockForm();
-  else renderSetupForm(legacyRecords ? legacyRecords.length : 0, legacyRecords);
 }
 
 /* -------------------------------- boot -------------------------------- */
