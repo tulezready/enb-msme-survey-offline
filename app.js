@@ -7,6 +7,22 @@ const STORAGE_KEY = 'enb_msme_draft_cache_v1'; // local draft-only cache now, no
 const DRAFT_KEY = 'enb_msme_draft_v1';
 const APP_ROLE = (document.body && document.body.dataset.role) || 'hq'; // 'hq' | 'enumerator'
 const DISTRICTS = ['Gazelle', 'Kokopo', 'Pomio', 'Rabaul'];
+const LLG_BY_DISTRICT = {
+  'Gazelle': ['Central Gazelle Rural', 'Inland Baining Rural', 'Lassul Baining Rural', 'Livuan-Reimber Rural', 'Toma-Vunadidir Rural'],
+  'Kokopo': ['Bitapaka Rural', 'Duke of York Rural', 'Kokopo-Vunamami Urban', 'Raluana Rural'],
+  'Pomio': ['Central/Inland Pomio Rural', 'East Pomio Rural', 'Melkoi Rural', 'Sinivit Rural', 'West Pomio-Mamusi Rural'],
+  'Rabaul': ['Balanataman Rural', 'Kombiu Rural', 'Rabaul Urban', 'Watom Island Rural']
+};
+function llgOptionsHTML(district, currentLlg) {
+  const list = LLG_BY_DISTRICT[district] || [];
+  let opts = `<option value="">${district ? 'Select LLG…' : 'Select district first'}</option>`;
+  opts += list.map(llg => `<option value="${esc(llg)}" ${llg === currentLlg ? 'selected' : ''}>${esc(llg)}</option>`).join('');
+  // Preserve an existing value that doesn't match the list (older records, imports) rather than silently wiping it
+  if (currentLlg && !list.includes(currentLlg)) {
+    opts += `<option value="${esc(currentLlg)}" selected>${esc(currentLlg)} (existing entry)</option>`;
+  }
+  return opts;
+}
 
 // Supabase project: tulezready's enb-msme-survey
 const SUPABASE_URL = 'https://lgfdzxcawggxrqvsgzpz.supabase.co';
@@ -569,13 +585,17 @@ function renderStepA(el) {
   el.innerHTML = `
     <div class="field">
       <label>District</label>
-      <select data-bind="location.district">
+      <select data-bind="location.district" id="loc-district-select">
         <option value="">Select district…</option>
         ${DISTRICTS.map(d => `<option value="${d}">${d}</option>`).join('')}
       </select>
     </div>
     <div class="field-row">
-      <div class="field"><label>LLG</label><input type="text" data-bind="location.llg"></div>
+      <div class="field"><label>LLG</label>
+        <select data-bind="location.llg" id="loc-llg-select">
+          ${llgOptionsHTML(draft.location.district, draft.location.llg)}
+        </select>
+      </div>
       <div class="field"><label>Ward</label><input type="text" data-bind="location.ward"></div>
     </div>
     <div class="field"><label>Village</label><input type="text" data-bind="location.village"></div>
@@ -592,6 +612,10 @@ function renderStepA(el) {
     <div class="field"><label>Postal address</label><textarea data-bind="location.postalAddress"></textarea></div>
   `;
   bindInputs(el);
+  $('#loc-district-select').addEventListener('change', () => {
+    draft.location.llg = ''; // old LLG almost certainly doesn't belong to the newly picked district
+    $('#loc-llg-select').innerHTML = llgOptionsHTML(draft.location.district, draft.location.llg);
+  });
 }
 
 /* ---- Step B: Employment & Education + business status ---- */
@@ -1098,30 +1122,28 @@ $('#import-file-input').addEventListener('change', async (e) => {
 });
 
 
-/* ---------------------------- offline readiness --------------------------- */
-let offlineReady = false;
-function setOfflineStatus(ready, note) {
-  offlineReady = ready;
+/* ---------------------------- connection status --------------------------- */
+function setConnectionStatus(online) {
   const dot = $('#offline-dot');
   const text = $('#offline-status-text');
-  if (dot) dot.style.background = ready ? '#8FD9A8' : '#F2C879';
-  if (text) text.textContent = ready ? 'Ready offline' : 'Preparing…';
+  if (dot) dot.style.background = online ? '#8FD9A8' : '#E06B5C';
+  if (text) text.textContent = online ? 'Online' : 'Offline';
 
   const icon = $('#offline-readiness-icon');
   const title = $('#offline-readiness-title');
   const desc = $('#offline-readiness-desc');
   const card = $('#offline-readiness-card');
   if (!icon) return;
-  if (ready) {
+  if (online) {
     icon.textContent = '✅';
-    title.textContent = 'Ready to work offline';
-    desc.textContent = 'The app is fully cached on this device. Safe to switch off data now.';
+    title.textContent = 'Connected';
+    desc.textContent = 'Signed-in access to the shared database is working normally.';
     card.style.borderColor = 'var(--success)';
   } else {
-    icon.textContent = '⏳';
-    title.textContent = 'Not fully cached yet';
-    desc.textContent = note || 'Stay connected for a moment while the app finishes storing itself on this device.';
-    card.style.borderColor = 'var(--accent)';
+    icon.textContent = '⚠️';
+    title.textContent = 'No connection';
+    desc.textContent = "This app needs internet to sign in and to load or save records — reconnect and try again.";
+    card.style.borderColor = 'var(--danger)';
   }
 }
 
@@ -1184,30 +1206,17 @@ if (APP_ROLE === 'enumerator') {
   const importSection = document.getElementById('import-section');
   if (importSection) importSection.remove();
 }
-if ('serviceWorker' in navigator) {
-  setOfflineStatus(false);
-  if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-    setOfflineStatus(false, 'This page was opened directly from a file, not from the website — offline mode only works when loaded from the live HTTPS site at least once.');
-  } else {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').then((reg) => {
-        if (navigator.serviceWorker.controller) setOfflineStatus(true);
-        const track = (worker) => {
-          if (!worker) return;
-          worker.addEventListener('statechange', () => {
-            if (worker.state === 'activated') setOfflineStatus(true);
-          });
-        };
-        track(reg.installing || reg.waiting);
-        reg.addEventListener('updatefound', () => track(reg.installing));
-      }).catch((err) => {
-        console.error('Service worker registration failed:', err);
-        setOfflineStatus(false, 'Could not set up offline mode on this browser. Try reloading once while connected.');
-      });
-      navigator.serviceWorker.addEventListener('controllerchange', () => setOfflineStatus(true));
-    });
-  }
-} else {
-  setOfflineStatus(false, 'This browser does not support offline mode. Try Chrome or the built-in browser on your phone.');
+
+// Service worker still caches the static shell for fast loading and PWA
+// install — it just no longer implies the app works without a connection.
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((err) => console.error('Service worker registration failed:', err));
+  });
 }
+
+setConnectionStatus(navigator.onLine);
+window.addEventListener('online', () => setConnectionStatus(true));
+window.addEventListener('offline', () => setConnectionStatus(false));
+
 initLockScreen();
