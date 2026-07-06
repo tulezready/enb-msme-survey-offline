@@ -8,7 +8,7 @@ const DRAFT_KEY = 'enb_msme_draft_v1';
 const APP_ROLE = (document.body && document.body.dataset.role) || 'hq'; // 'hq' | 'enumerator'
 const DISTRICTS = ['Gazelle', 'Kokopo', 'Pomio', 'Rabaul'];
 const LLG_BY_DISTRICT = {
-  'Gazelle': ['Central Gazelle Rural', 'Inland Baining Rural', 'Lassul Baining Rural', 'Livuan-Reimber Rural', 'Toma-Vunadidir Rural'],
+  'Gazelle': ['Central Gazelle Rural', 'Inland Baining Rural', 'Lassul Baining Rural', 'Livuan Rural', 'Reimber Rural', 'Toma Rural', 'Vunadidir Rural'],
   'Kokopo': ['Bitapaka Rural', 'Duke of York Rural', 'Kokopo-Vunamami Urban', 'Raluana Rural'],
   'Pomio': ['Central/Inland Pomio Rural', 'East Pomio Rural', 'Melkoi Rural', 'Sinivit Rural', 'West Pomio-Mamusi Rural'],
   'Rabaul': ['Balanataman Rural', 'Kombiu Rural', 'Rabaul Urban', 'Watom Island Rural']
