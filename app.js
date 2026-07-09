@@ -8,9 +8,9 @@ const DRAFT_KEY = 'enb_msme_draft_v1';
 const APP_ROLE = (document.body && document.body.dataset.role) || 'hq'; // 'hq' | 'enumerator'
 const DISTRICTS = ['Gazelle', 'Kokopo', 'Pomio', 'Rabaul'];
 const LLG_BY_DISTRICT = {
-  'Gazelle': ['Central Gazelle Rural', 'Inland Baining Rural', 'Lassul Baining Rural', 'Livuan Rural', 'Reimber Rural', 'Toma Rural', 'Vunadidir Rural'],
+  'Gazelle': ['Central Gazelle Rural', 'Inland Baining Rural', 'Lassul Baining Rural', 'Open Bay Rural', 'Livuan Rural', 'Reimber Rural', 'Toma Rural', 'Vunadidir Rural'],
   'Kokopo': ['Bitapaka Rural', 'Duke of York Rural', 'Kokopo-Vunamami Urban', 'Raluana Rural'],
-  'Pomio': ['Central/Inland Pomio Rural', 'East Pomio Rural', 'Melkoi Rural', 'Sinivit Rural', 'West Pomio-Mamusi Rural'],
+  'Pomio': ['Central Pomio Rural', 'Inland Pomio Rural', 'East Pomio Rural', 'Melkoi Rural', 'Sinivit Rural', 'West Pomio Rural', 'Mamusi Rural'],
   'Rabaul': ['Balanataman Rural', 'Kombiu Rural', 'Rabaul Urban', 'Watom Island Rural']
 };
 function llgOptionsHTML(district, currentLlg) {
@@ -20,6 +20,45 @@ function llgOptionsHTML(district, currentLlg) {
   // Preserve an existing value that doesn't match the list (older records, imports) rather than silently wiping it
   if (currentLlg && !list.includes(currentLlg)) {
     opts += `<option value="${esc(currentLlg)}" selected>${esc(currentLlg)} (existing entry)</option>`;
+  }
+  return opts;
+}
+
+const WARDS_BY_LLG = {
+  'Central Gazelle Rural': ['Napapar 1','Napapar 2','Napapar 3','Napapar 4','Napapar 5','Vunagogo','Takekel','Kadakada','Rakunai','Latlat','Navunaram','Tavui-liu','Malmaluan','Karavia no.1','Karavia no.2','Tavilo Settlement','Talakua','Kerevat Township','Tinganagalip'],
+  'Inland Baining Rural': ['Alakasam','Lamarain','Raunsepna','Yayam','Malasaet','Burit','Nanapki','Liaga','Kereba','Vudal','Vunapalading #1','Vunapalading #2','Rangulit','Lamarainam','Mandres','Kulit','Radingi','Kamanakam','Ragaga','Rhungagi','Kadulaung settlement #1','Kadulaung settlement #2','Vungi','Gaulim','Kainagunan','Ivere','Malabonga'],
+  'Lassul Baining Rural': ['Takia','Nangasn','Traiwara','Lassul','Puktas','Karo','Panarupkap','Laan','Yalom','Komgi','Naviu/Mamapit','Walmetki','Kolopom Settlement','Warakindam','Morokindam','Mobisberg Plantation'],
+  'Open Bay Rural': ['Poniar/Kanako','Mobilum','Matanakunai','Mandrabit','Wilambemki/Poiniara','Open Bay Timbers'],
+  'Livuan Rural': ['Rababat','Vunairoto','Kabakada','Nabata/Rakumkubur','Toboina','Raluana #3','Putanagororoi','Vunalir','Ratongor','Vunadavai','Lungalunga','Mei-Livuan','Volavolo/Rasimen'],
+  'Reimber Rural': ['Vunalaka','Kuraip','Vunakalkalulu','Raburbur','Taranga','Rakotop','Kikitabu','Vunaulaiting','Totovel','Vunapaka','Rakada','Vunaiting','Ramalmal','Towaleka','Vunakainalama','Ramale'],
+  'Vunadidir Rural': ['Gunanur','Rabagi no. 1','Rabagi no. 2','Raim','Rapitok no. 1','Rapitok no.2','Rapitok no.3','Rapitok no.4','Ratavul #1','Vunakabi','Tanaka','Taulil no.1','Taulil no.2','Vunadidir','Ratavul no. 2'],
+  'Toma Rural': ['Bitakapuk no.1','Bitakapuk no. 2','Tagitagi no. 1','Tagitagi no. 2','Wairiki no. 1','Wairiki no. 2','Wairiki no. 3','Wairiki no. 4','Viviran no. 1','Viviran no. 2','Vunakaur','Baie','Papalaba','Vunararere','Tamanairik no. 1','Tamanairik no. 2','Rabata','Baitakapuk no. 3'],
+
+  'Balanataman Rural': ['Ratung','Pilapila','Karavia','Ratavul','Volavolo','Nonga','Tavui no.1','Tavui no.2','Tavui no.3','Malaguna no.1','Malaguna no.2','Malaguna no.3','Iawakaka','Rapolo','Raluan no.1','Raluan no.2','Tavana','Valaur','Nonga Base Hospital'],
+  'Kombiu Rural': ['Baai','Nodup','Matalau','Rakunat','Rabuana','Korere 1','Korere 2','Talvat','Matupit no. 1','Matupit no. 2','Matupit no. 3','Matupit no. 4','Matupit no. 5'],
+  'Rabaul Urban': ['Ward 4','Ward 5','Ward 6','Ward 7','Ward 8','Ward 9','Ward 10','Ward 11','Ward 12','Ward 13','Ward 15'],
+  'Watom Island Rural': ['Rakival','Taranata','Valaur','Vunabuk','Vunakabai','Vunaulaiar'],
+
+  'Bitapaka Rural': ['Tavui no.1','Tavui no.2','Ratavul','Balada','Ralubang','Vunabaur','Watwat','Ganai','Marmar','Menebunbun','Bilur','Korai','Kamakamar','Birar','Makurapau','Rainau','Malakuna','Togoro','Tabuna','Katakatai','Londip','Ulaveo'],
+  'Duke of York Rural': ['Makada/Nagaila','Molot','Maren','Butlivuan','Waira','Nabual','Inolo Kabatirai','Kumaina','Kabilomo','Urakukur','Kababiai','Mualim','Urian','Palipal','Utuan','Karawara','Urukuk','Pirtop','Nakukur no.1 & 2','Rakanda','Palpal'],
+  'Kokopo-Vunamami Urban': ['Karavia','Vunamami','Bitarebarebe','Vunabalbal','Gunanba','Tinganavudu','Malakuna','Ulagunan','Livuan','Ramale','Bitagalip','Kabakaul','Takubar','Palnakuar','Ulaulatava','Vunapope','Ngunguna','Gunanur','Palavirua','Vunamai no.2'],
+  'Raluana Rural': ['Raburua','Bitatita','Nugvalian','Barovon','Raluana','Ialakua','Vunatagia','Ranguna','Bitabaur','Vunamurmur','Livuan','Vunaulul','Ralalar','Turagunan','Kunakunai','Ngatur','Tinganalom','Nanuk','Balanataman','Ravat','Talakua'],
+
+  'Melkoi Rural': ['Makmak','Lopun','Simi','Tavolo','Meletong','Uvol','Einahelei','Ruachana','Mininga','Maso','Esletenae','Mainge','Atu','Haumakia','Poio','Pilematana','Lausus','Kenmininga','Warale'],
+  'Sinivit Rural': ['Rieit','Arabam','Maranagi','Lemengi','Sanbum','Marambu','Lat','Gar','Marai','Ili','Karong','Sunam','Marunga','Kavudemki','Tol','Sikut','Laup','Ivon/Gore'],
+  'West Pomio Rural': ['Gugulena','Malmal','Maginuna','Totongpal','Kaiton','Puapal','Rowan/Malo','Pomai/Mu','Poro/Salel','Irena','Mauna','Lau','Bairaman','Tolel','Palmalmal'],
+  'Mamusi Rural': ['Maitao','Serenguna','Paliavulu','Viosopuna','Pokapuna','Bili','Pakia','Okempuna','Kaitoto','Mapuna','Peling','Aona','Yauyau','Kaitou','Kinsena','Ulutu','Kerongkorona','Sivaona','Pepeng','Kangelona'],
+  'Central Pomio Rural': ['Parole','Malakur','Kerkernena','Baien (West)','Galue','Marmar','Pomio','Olaipun','Sali','Bovalpun','Kalakuru','Kawa/Pora','Tokai','Matong','Buka','Pulpul','Kavale'],
+  'Inland Pomio Rural': ['Pakia','Mile','Mukulu','Malvoni','Muele','Bago','Pakaraman','Birigi','Bagitave','Kapkena','Tuki','Lakiri','Marmu','Masuari','Manigugule','Gelioi','Ngavale'],
+  'East Pomio Rural': ['Lamarain','Long','Hoya','Kaukum','Milim','Guma','Klampun','Sampun','Wawas','Bain','Raolman','Ivai','Setwei']
+};
+
+function wardOptionsHTML(llg, currentWard) {
+  const list = WARDS_BY_LLG[llg] || [];
+  let opts = `<option value="">${llg ? 'Select ward…' : 'Select LLG first'}</option>`;
+  opts += list.map(w => `<option value="${esc(w)}" ${w === currentWard ? 'selected' : ''}>${esc(w)}</option>`).join('');
+  if (currentWard && !list.includes(currentWard)) {
+    opts += `<option value="${esc(currentWard)}" selected>${esc(currentWard)} (existing entry)</option>`;
   }
   return opts;
 }
@@ -631,7 +670,11 @@ function renderStepA(el) {
           ${llgOptionsHTML(draft.location.district, draft.location.llg)}
         </select>
       </div>
-      <div class="field"><label>Ward</label><input type="text" data-bind="location.ward"></div>
+      <div class="field"><label>Ward</label>
+        <select data-bind="location.ward" id="loc-ward-select">
+          ${wardOptionsHTML(draft.location.llg, draft.location.ward)}
+        </select>
+      </div>
     </div>
     <div class="field"><label>Village</label><input type="text" data-bind="location.village"></div>
     <div class="field-row">
@@ -649,7 +692,13 @@ function renderStepA(el) {
   bindInputs(el);
   $('#loc-district-select').addEventListener('change', () => {
     draft.location.llg = ''; // old LLG almost certainly doesn't belong to the newly picked district
+    draft.location.ward = '';
     $('#loc-llg-select').innerHTML = llgOptionsHTML(draft.location.district, draft.location.llg);
+    $('#loc-ward-select').innerHTML = wardOptionsHTML(draft.location.llg, draft.location.ward);
+  });
+  $('#loc-llg-select').addEventListener('change', () => {
+    draft.location.ward = ''; // old ward almost certainly doesn't belong to the newly picked LLG
+    $('#loc-ward-select').innerHTML = wardOptionsHTML(draft.location.llg, draft.location.ward);
   });
 }
 
