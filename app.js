@@ -222,8 +222,18 @@ function fmtDate(iso) {
 }
 
 /* ------------------------------ navigation ------------------------------- */
+let autosaveInterval = null;
+function startAutosaveInterval() {
+  stopAutosaveInterval();
+  autosaveInterval = setInterval(() => { if (draft) saveDraft(draft); }, 4000);
+}
+function stopAutosaveInterval() {
+  if (autosaveInterval) { clearInterval(autosaveInterval); autosaveInterval = null; }
+}
+
 function switchView(view) {
   currentView = view;
+  if (view !== 'wizard') stopAutosaveInterval();
   ['dashboard', 'records', 'wizard', 'detail', 'transfer'].forEach(v => {
     $('#view-' + v).hidden = (v !== view);
   });
@@ -255,6 +265,7 @@ async function startNewSurvey() {
       stepIndex = 0;
       switchView('wizard');
       renderWizard();
+      startAutosaveInterval();
       return;
     } else {
       clearDraft();
@@ -265,6 +276,7 @@ async function startNewSurvey() {
   stepIndex = 0;
   switchView('wizard');
   renderWizard();
+  startAutosaveInterval();
 }
 
 function editRecord(id) {
@@ -275,6 +287,7 @@ function editRecord(id) {
   stepIndex = 0;
   switchView('wizard');
   renderWizard();
+  startAutosaveInterval();
 }
 
 /* ------------------------------- dashboard -------------------------------- */
@@ -331,6 +344,7 @@ function recordItemHTML(r) {
 }
 
 /* ------------------------------- records list ------------------------------ */
+const RECORDS_PAGE_SIZE = 50;
 function renderRecordsList() {
   recordsCache = loadRecords();
   const chipsEl = $('#district-chips');
@@ -354,15 +368,38 @@ function renderRecordsList() {
   }
   list = [...list].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
+  // Only ever render a page's worth of DOM at once — with a few thousand
+  // records this is what keeps scrolling and re-filtering feeling instant
+  // instead of rebuilding thousands of rows on every keystroke.
+  if (renderRecordsList._resetPage !== false) renderRecordsList._page = 1;
+  renderRecordsList._resetPage = true;
+  const page = renderRecordsList._page || 1;
+  const visibleCount = Math.min(list.length, page * RECORDS_PAGE_SIZE);
+  const visible = list.slice(0, visibleCount);
+
   const container = $('#records-list-container');
   if (list.length === 0) {
     container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching records.</p></div>`;
   } else {
-    container.innerHTML = list.map(recordItemHTML).join('');
+    let html = visible.map(recordItemHTML).join('');
+    if (visibleCount < list.length) {
+      html += `<button class="btn btn-outline btn-full" id="btn-load-more-records">Load more (${list.length - visibleCount} remaining)</button>`;
+    }
+    container.innerHTML = html;
     $all('.record-item', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
+    const loadMoreBtn = $('#btn-load-more-records');
+    if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => {
+      renderRecordsList._page = page + 1;
+      renderRecordsList._resetPage = false;
+      renderRecordsList();
+    });
   }
 }
-$('#search-input').addEventListener('input', renderRecordsList);
+let searchDebounceTimer = null;
+$('#search-input').addEventListener('input', () => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(renderRecordsList, 200);
+});
 
 /* ------------------------------ records summary (all roles) ------------------------------ */
 $('#records-mode-toggle').style.display = 'flex';
@@ -1163,6 +1200,11 @@ function saveDraftRecord() {
     renderWizard();
     return;
   }
+  const dup = findDuplicateRecord(draft);
+  if (dup) {
+    const proceed = confirm(`A record for Household No. ${draft.location.householdNo} in ${draft.location.llg} (Ward ${draft.location.ward || '—'}) already exists — collected ${fmtDate(dup.location.dateCollected)}. Save this as a separate entry anyway?`);
+    if (!proceed) return;
+  }
   draft.updatedAt = new Date().toISOString();
   let all = loadRecords();
   const idx = all.findIndex(r => r.id === draft.id);
@@ -1170,8 +1212,18 @@ function saveDraftRecord() {
   saveRecords(all);
   recordsCache = all;
   clearDraft();
+  stopAutosaveInterval();
   toast(editingExisting ? 'Record updated' : 'Record saved to this device');
   switchView('dashboard');
+}
+
+function findDuplicateRecord(rec) {
+  return recordsCache.find(r => r.id !== rec.id &&
+    r.location.district === rec.location.district &&
+    r.location.llg === rec.location.llg &&
+    r.location.ward === rec.location.ward &&
+    r.location.householdNo === rec.location.householdNo &&
+    r.location.householdNo);
 }
 
 /* -------------------------------- transfer -------------------------------- */
