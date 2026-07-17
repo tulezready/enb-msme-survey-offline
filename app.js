@@ -278,6 +278,9 @@ function switchView(view) {
 $all('.bottomnav button').forEach(btn => {
   btn.addEventListener('click', () => {
     const v = btn.dataset.view;
+    if (currentView === 'wizard' && v !== 'wizard-new') {
+      if (!confirm('Leave this survey? Your progress is autosaved — you can continue it later from "New survey."')) return;
+    }
     if (v === 'wizard-new') { startNewSurvey(); return; }
     switchView(v);
   });
@@ -341,7 +344,10 @@ async function renderDashboard() {
     stats = data;
   } catch (e) {
     console.error('Failed to load dashboard stats:', e);
-    dEl.innerHTML = `<div class="review-line"><span class="k">Could not load — check your connection</span><span class="v"></span></div>`;
+    dEl.innerHTML = `<div class="review-line"><span class="k">Could not load — check your connection</span><span class="v"></span></div>
+      <button class="btn btn-outline btn-full" style="margin-top:10px;" id="btn-retry-dashboard">Retry</button>`;
+    const retryBtn = $('#btn-retry-dashboard');
+    if (retryBtn) retryBtn.addEventListener('click', renderDashboard);
     return;
   }
 
@@ -441,7 +447,10 @@ async function renderRecordsList() {
     }
   } catch (e) {
     console.error('Failed to load records:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load records — check your connection.</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load records — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-records');
+    if (retryBtn) retryBtn.addEventListener('click', () => { renderRecordsList._resetPage = false; renderRecordsList(); });
   }
 }
 let searchDebounceTimer = null;
@@ -585,7 +594,10 @@ async function renderRecordsSummary() {
     s = data;
   } catch (e) {
     console.error('Failed to load summary:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load summary — check your connection.</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load summary — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-summary">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-summary');
+    if (retryBtn) retryBtn.addEventListener('click', renderRecordsSummary);
     return;
   }
 
@@ -1275,6 +1287,7 @@ async function renderTransfer() {
   if (emailEl) emailEl.textContent = user ? user.email : '—';
 }
 $('#btn-sign-out').addEventListener('click', async () => {
+  clearTimeout(inactivityTimer);
   await sb.auth.signOut();
   recordsCache = [];
   draft = null;
@@ -1483,10 +1496,30 @@ async function handleLogin(email, password) {
   await finishLogin();
 }
 
+const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 30 minutes
+let inactivityTimer = null;
+async function signOutForInactivity() {
+  await sb.auth.signOut().catch(() => {});
+  recordsCache = [];
+  draft = null;
+  stopAutosaveInterval();
+  $('#lock-screen').hidden = false;
+  document.body.classList.add('locked');
+  renderLoginForm();
+  toast('Signed out after 30 minutes of inactivity');
+}
+function resetInactivityTimer() {
+  if (document.body.classList.contains('locked')) return; // not signed in - nothing to time out
+  clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(signOutForInactivity, INACTIVITY_LIMIT_MS);
+}
+['click', 'keydown', 'touchstart', 'scroll'].forEach(evt => document.addEventListener(evt, resetInactivityTimer, { passive: true }));
+
 async function finishLogin() {
   recordsCache = []; // no longer preloaded in full - Dashboard, Records, and Summary each fetch what they need
   $('#lock-screen').hidden = true;
   document.body.classList.remove('locked');
+  resetInactivityTimer();
   renderDashboard();
 }
 
