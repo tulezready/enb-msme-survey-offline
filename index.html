@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PHQ App - ENBPA Economic & MSME Survey</title>
+<title>ENB MSME Survey — Offline</title>
 <meta name="theme-color" content="#1B4B43">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -393,7 +393,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 }
 </style>
 </head>
-<body data-role="hq">
+<body data-role="enumerator">
 
 <div id="lock-screen" class="lock-screen" hidden>
   <div class="lock-card">
@@ -406,8 +406,8 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <div class="brand">
     <div class="seal"><img src="logo.svg" alt="ENB Commerce & Industry logo"></div>
     <div class="brand-text">
-      <div class="t1">Division of Commerce &amp; Industry</div>
-      <div class="t2">Economic & MSME Survey</div>
+      <div class="t1" id="brand-llg-label">Commerce &amp; Industry</div>
+      <div class="t2">MSME Survey</div>
     </div>
   </div>
   <div class="offline-pill"><span class="dot" id="offline-dot"></span><span id="offline-status-text">Checking…</span> · <span id="record-count-pill">0</span></div>
@@ -459,7 +459,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 </div>
 
 <div id="view-transfer" class="view" hidden>
-  <div class="section-title">Connection status</div>
+  <div class="section-title">Offline status</div>
   <div class="card" id="offline-readiness-card" style="display:flex; align-items:center; gap:12px;">
     <div style="font-size:22px;" id="offline-readiness-icon">⏳</div>
     <div style="flex:1;">
@@ -468,9 +468,18 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     </div>
   </div>
 
+  <div class="section-title">Upload to HQ</div>
+  <div class="card">
+    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Push your new records straight into the shared database whenever you have signal — no file, no email, no USB. Already-uploaded records won't be sent again.</p>
+    <div class="review-line"><span class="k">Status</span><span class="v" id="upload-status">No records yet</span></div>
+    <button class="btn btn-primary btn-full" style="margin-top:12px;" id="btn-upload-hq">Upload to HQ</button>
+    <button class="btn btn-outline btn-full" style="margin-top:8px;" id="btn-resync-hq">Resync all with HQ</button>
+    <p class="hint" style="margin-top:8px;">Only use Resync if HQ says a record you already sent is missing — it re-checks everything on this device, so it's slower than the regular upload above.</p>
+  </div>
+
   <div class="section-title">Send data to HQ</div>
   <div class="card">
-    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Export everything collected on this device. Share the file by email, USB, or Bluetooth when you reach connectivity or a computer.</p>
+    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Alternative to the upload above — export a file and share it manually by email, USB, or Bluetooth.</p>
     <button class="row-action" id="btn-export-json"><div class="icon">📤</div><div class="txt"><strong>Export all as JSON</strong><span>Full backup — for re-import into this app at HQ</span></div><div class="chev">›</div></button>
     <button class="row-action" id="btn-export-csv"><div class="icon">📊</div><div class="txt"><strong>Export all as CSV</strong><span>Open in Excel / Google Sheets</span></div><div class="chev">›</div></button>
   </div>
@@ -489,16 +498,28 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     </div>
   </div>
 
-  <div class="section-title">Account</div>
+  <div class="section-title">Device Assignment</div>
   <div class="card">
-    <div class="review-line"><span class="k">Signed in as</span><span class="v" id="account-email">—</span></div>
-    <button class="btn btn-outline btn-full" style="margin-top:12px;" id="btn-sign-out">Sign out</button>
+    <div class="review-line"><span class="k">This device is assigned to</span><span class="v" id="assigned-llg-display">—</span></div>
+    <button class="btn btn-outline btn-full" style="margin-top:10px;" id="btn-change-llg">Change LLG Assignment</button>
+    <p class="hint" style="margin-top:8px;">Only changes NEW surveys going forward — existing records keep their original LLG. Requires your PIN.</p>
   </div>
 
-  <div class="section-title">Database</div>
+  <div class="section-title">Security</div>
   <div class="card">
-    <div class="review-line"><span class="k">Records in database</span><span class="v" id="transfer-record-count">0</span></div>
-    <p class="hint" style="margin-top:8px;">This is the shared provincial database — deleting a record here removes it for everyone. Use a record's own Delete button if you need to remove one.</p>
+    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">This device's survey data is encrypted with your PIN.</p>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-outline" style="flex:1;" id="btn-lock-device">Lock this device</button>
+      <button class="btn btn-outline" style="flex:1;" id="btn-change-pin">Change PIN</button>
+    </div>
+  </div>
+
+  <div class="section-title">Device data</div>
+  <div class="card">
+    <div class="review-line"><span class="k">Records stored on this device</span><span class="v" id="transfer-record-count">0</span></div>
+    <div class="review-line"><span class="k">Storage used (approx.)</span><span class="v" id="transfer-storage-size">0 KB</span></div>
+    <button class="btn btn-danger btn-full" style="margin-top:12px;" id="btn-clear-all">Erase all records from this device</button>
+    <p class="hint" style="margin-top:8px;">Only erase after confirming your export was received at HQ.</p>
   </div>
 </div>
 
