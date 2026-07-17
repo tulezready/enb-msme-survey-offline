@@ -122,6 +122,32 @@ async function persistRecords(records) {
   const { error } = await sb.from('msme_records').upsert(rows, { onConflict: 'id' });
   if (error) throw error;
 }
+// Single-record save — updates just this one row remotely and merges it into
+// whatever's currently cached, rather than replacing the whole cache (which
+// no longer holds "everything" now that Dashboard/Records/Summary each fetch
+// only what they need).
+async function upsertRecordRemote(record) {
+  const idx = recordsCache.findIndex(r => r.id === record.id);
+  if (idx >= 0) recordsCache[idx] = record; else recordsCache.push(record);
+  const { error } = await sb.from('msme_records').upsert(recordToRow(record), { onConflict: 'id' });
+  if (error) throw error;
+}
+async function checkDuplicateRemote(rec) {
+  try {
+    let query = sb.from('msme_records').select('id, date_collected')
+      .eq('district', rec.location.district)
+      .eq('llg', rec.location.llg)
+      .eq('household_no', rec.location.householdNo)
+      .neq('id', rec.id || '');
+    if (rec.location.ward) query = query.eq('ward', rec.location.ward);
+    const { data, error } = await query.limit(1);
+    if (error) throw error;
+    return (data && data[0]) || null;
+  } catch (e) {
+    console.error('Duplicate check failed (continuing without it):', e);
+    return null;
+  }
+}
 function recordToRow(r) {
   return {
     id: r.id,
@@ -132,6 +158,8 @@ function recordToRow(r) {
     household_no: r.location.householdNo || null,
     business_status: r.businessStatus || null,
     date_collected: r.location.dateCollected || null,
+    business_name: (r.business && r.business.name) || null,
+    contact_person: r.location.contactPerson || null,
     data: r
   };
 }
@@ -279,9 +307,18 @@ async function startNewSurvey() {
   startAutosaveInterval();
 }
 
-function editRecord(id) {
-  const rec = recordsCache.find(r => r.id === id);
-  if (!rec) return;
+async function fetchRecordById(id) {
+  const { data, error } = await sb.from('msme_records').select('data').eq('id', id).single();
+  if (error) throw error;
+  return data.data;
+}
+
+async function editRecord(id) {
+  let rec = recordsCache.find(r => r.id === id);
+  if (!rec) {
+    try { rec = await fetchRecordById(id); }
+    catch (e) { console.error('Failed to load record for edit:', e); toast('Could not load record — check your connection'); return; }
+  }
   draft = JSON.parse(JSON.stringify(rec));
   editingExisting = true;
   stepIndex = 0;
@@ -291,25 +328,34 @@ function editRecord(id) {
 }
 
 /* ------------------------------- dashboard -------------------------------- */
-function renderDashboard() {
-  recordsCache = loadRecords();
-  $('#record-count-pill').textContent = recordsCache.length;
-  $('#stat-total').textContent = recordsCache.length;
-  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
-  $('#stat-week').textContent = recordsCache.filter(r => new Date(r.createdAt).getTime() >= weekAgo).length;
-  $('#stat-formal').textContent = recordsCache.filter(r => r.businessStatus === 'formal').length;
-  $('#stat-informal').textContent = recordsCache.filter(r => r.businessStatus === 'informal').length;
-
-  const byDistrict = {};
-  DISTRICTS.forEach(d => byDistrict[d] = 0);
-  recordsCache.forEach(r => { const d = r.location.district; if (d) byDistrict[d] = (byDistrict[d] || 0) + 1; });
+async function renderDashboard() {
   const dEl = $('#district-breakdown');
+  const rEl = $('#recent-list');
+  dEl.innerHTML = `<div class="review-line"><span class="k">Loading…</span><span class="v"></span></div>`;
+  rEl.innerHTML = '';
+
+  let stats;
+  try {
+    const { data, error } = await sb.rpc('get_dashboard_stats');
+    if (error) throw error;
+    stats = data;
+  } catch (e) {
+    console.error('Failed to load dashboard stats:', e);
+    dEl.innerHTML = `<div class="review-line"><span class="k">Could not load — check your connection</span><span class="v"></span></div>`;
+    return;
+  }
+
+  $('#record-count-pill').textContent = stats.total;
+  $('#stat-total').textContent = stats.total;
+  $('#stat-week').textContent = stats.this_week;
+  $('#stat-formal').textContent = stats.formal;
+  $('#stat-informal').textContent = stats.informal;
+
   dEl.innerHTML = DISTRICTS.map(d => `
-    <div class="review-line"><span class="k">${esc(d)}</span><span class="v">${byDistrict[d] || 0}</span></div>
+    <div class="review-line"><span class="k">${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
   `).join('');
 
-  const recent = [...recordsCache].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 5);
-  const rEl = $('#recent-list');
+  const recent = stats.recent || [];
   if (recent.length === 0) {
     rEl.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No surveys recorded yet.<br>Tap "Start new survey" to begin.</p></div>`;
   } else {
@@ -343,10 +389,9 @@ function recordItemHTML(r) {
   </div>`;
 }
 
-/* ------------------------------- records list ------------------------------ */
+/* ------------------------------ records list ------------------------------ */
 const RECORDS_PAGE_SIZE = 50;
-function renderRecordsList() {
-  recordsCache = loadRecords();
+async function renderRecordsList() {
   const chipsEl = $('#district-chips');
   const activeChip = renderRecordsList._chip || 'All';
   chipsEl.innerHTML = ['All', ...DISTRICTS].map(d =>
@@ -357,42 +402,46 @@ function renderRecordsList() {
     renderRecordsList();
   }));
 
-  const q = ($('#search-input').value || '').toLowerCase();
-  let list = recordsCache;
-  if (activeChip !== 'All') list = list.filter(r => r.location.district === activeChip);
-  if (q) {
-    list = list.filter(r => {
-      const hay = [r.location.village, r.location.householdNo, r.location.contactPerson, r.business.name, r.location.ward, r.location.llg].join(' ').toLowerCase();
-      return hay.includes(q);
-    });
-  }
-  list = [...list].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-
-  // Only ever render a page's worth of DOM at once — with a few thousand
-  // records this is what keeps scrolling and re-filtering feeling instant
-  // instead of rebuilding thousands of rows on every keystroke.
   if (renderRecordsList._resetPage !== false) renderRecordsList._page = 1;
   renderRecordsList._resetPage = true;
   const page = renderRecordsList._page || 1;
-  const visibleCount = Math.min(list.length, page * RECORDS_PAGE_SIZE);
-  const visible = list.slice(0, visibleCount);
+  const q = ($('#search-input').value || '').trim();
 
   const container = $('#records-list-container');
-  if (list.length === 0) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching records.</p></div>`;
-  } else {
-    let html = visible.map(recordItemHTML).join('');
-    if (visibleCount < list.length) {
-      html += `<button class="btn btn-outline btn-full" id="btn-load-more-records">Load more (${list.length - visibleCount} remaining)</button>`;
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+
+  try {
+    let query = sb.from('msme_records').select('data', { count: 'exact' }).order('updated_at', { ascending: false });
+    if (activeChip !== 'All') query = query.eq('district', activeChip);
+    if (q) {
+      const term = `%${q}%`;
+      query = query.or(`village.ilike.${term},household_no.ilike.${term},contact_person.ilike.${term},business_name.ilike.${term},ward.ilike.${term},llg.ilike.${term}`);
     }
-    container.innerHTML = html;
-    $all('.record-item', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
-    const loadMoreBtn = $('#btn-load-more-records');
-    if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => {
-      renderRecordsList._page = page + 1;
-      renderRecordsList._resetPage = false;
-      renderRecordsList();
-    });
+    query = query.range(0, page * RECORDS_PAGE_SIZE - 1);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    const list = (data || []).map(row => row.data);
+
+    if (list.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching records.</p></div>`;
+    } else {
+      let html = list.map(recordItemHTML).join('');
+      if (list.length < count) {
+        html += `<button class="btn btn-outline btn-full" id="btn-load-more-records">Load more (${count - list.length} remaining)</button>`;
+      }
+      container.innerHTML = html;
+      $all('.record-item', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
+      const loadMoreBtn = $('#btn-load-more-records');
+      if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => {
+        renderRecordsList._page = page + 1;
+        renderRecordsList._resetPage = false;
+        renderRecordsList();
+      });
+    }
+  } catch (e) {
+    console.error('Failed to load records:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load records — check your connection.</p></div>`;
   }
 }
 let searchDebounceTimer = null;
@@ -525,51 +574,42 @@ function trendChartHTML(title, buckets) {
   </div>`;
 }
 
-function renderRecordsSummary() {
-  const all = loadRecords();
-  const total = all.length;
+async function renderRecordsSummary() {
   const container = $('#records-summary-mode');
-  if (total === 0) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No records on this device yet.<br>The summary fills in once records are collected or imported.</p></div>`;
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading summary…</p></div>`;
+
+  let s;
+  try {
+    const { data, error } = await sb.rpc('get_summary_stats', { weeks_back: 8 });
+    if (error) throw error;
+    s = data;
+  } catch (e) {
+    console.error('Failed to load summary:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load summary — check your connection.</p></div>`;
     return;
   }
 
-  const byDistrict = {}; DISTRICTS.forEach(d => byDistrict[d] = 0);
-  const byDistrictStatus = {}; DISTRICTS.forEach(d => byDistrictStatus[d] = { formal: 0, informal: 0, none: 0 });
-  const byStatus = { formal: 0, informal: 0, none: 0 };
-  let totalFormallyEmployed = 0, totalEmployedListed = 0, totalUnemployedListed = 0;
-  const activityTally = {};
-  let ipaYes = 0, ipaNo = 0, loanYes = 0, loanNo = 0, trainingYes = 0, trainingNo = 0;
-  const trainingReqTally = {}, assistanceTally = {};
-  const turnoverTally = {}; TURNOVER_BRACKETS.forEach(([c]) => turnoverTally[c] = 0);
-  const expensesTally = {}; EXPENSE_BRACKETS.forEach(([c]) => expensesTally[c] = 0);
-  const cropTotals = {}; FIXED_CROPS.forEach(c => cropTotals[c] = { blocks: 0, trees: 0 });
-  let informalEntryCount = 0;
+  const total = s.total || 0;
+  if (total === 0) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No records yet.<br>The summary fills in once records are collected or imported.</p></div>`;
+    return;
+  }
 
-  all.forEach(r => {
-    if (r.location.district) byDistrict[r.location.district] = (byDistrict[r.location.district] || 0) + 1;
-    if (r.businessStatus === 'formal') byStatus.formal++;
-    else if (r.businessStatus === 'informal') byStatus.informal++;
-    else if (r.businessStatus === 'none') byStatus.none++;
-    if (r.location.district && byDistrictStatus[r.location.district] && ['formal', 'informal', 'none'].includes(r.businessStatus)) {
-      byDistrictStatus[r.location.district][r.businessStatus]++;
-    }
+  const byStatus = s.by_status || { formal: 0, informal: 0, none: 0 };
+  const byDistrictStatus = {};
+  DISTRICTS.forEach(d => byDistrictStatus[d] = { formal: 0, informal: 0, none: 0 });
+  (s.by_district || []).forEach(row => { if (byDistrictStatus[row.label]) byDistrictStatus[row.label] = { formal: row.formal, informal: row.informal, none: row.none }; });
 
-    totalFormallyEmployed += Number(r.employment.numFormallyEmployed) || 0;
-    totalEmployedListed += r.employment.employedMembers.length;
-    totalUnemployedListed += r.employment.unemployedMembers.length;
-
-    Object.values(r.business.activities).forEach(v => { if (Array.isArray(v)) v.forEach(item => { activityTally[item] = (activityTally[item] || 0) + 1; }); });
-    if (r.business.ipaRegistered === 'Yes') ipaYes++; else if (r.business.ipaRegistered === 'No') ipaNo++;
-    if (r.business.loanAccess === 'Yes') loanYes++; else if (r.business.loanAccess === 'No') loanNo++;
-    if (r.development.trainingAttended === 'Yes') trainingYes++; else if (r.development.trainingAttended === 'No') trainingNo++;
-    (r.development.trainingTypesRequired || []).forEach(t => { trainingReqTally[t] = (trainingReqTally[t] || 0) + 1; });
-    (r.development.assistanceRequired || []).forEach(t => { assistanceTally[t] = (assistanceTally[t] || 0) + 1; });
-    if (r.economic.turnoverBracket) turnoverTally[r.economic.turnoverBracket] = (turnoverTally[r.economic.turnoverBracket] || 0) + 1;
-    if (r.economic.expensesBracket) expensesTally[r.economic.expensesBracket] = (expensesTally[r.economic.expensesBracket] || 0) + 1;
-    FIXED_CROPS.forEach(c => { const d = r.cashCrops.fixed[c]; if (d) { cropTotals[c].blocks += Number(d.blocks) || 0; cropTotals[c].trees += Number(d.trees) || 0; } });
-    informalEntryCount += (r.informal.entries || []).length;
-  });
+  const employment = s.employment || { total_formally_employed: 0, employed_listed: 0, unemployed_listed: 0 };
+  const topActivities = (s.top_activities || []).map(a => [a.label, a.count]);
+  const ipaLoans = s.ipa_loans || { ipa_yes: 0, ipa_no: 0, loan_yes: 0, loan_no: 0 };
+  const training = s.training || { attended_yes: 0, attended_no: 0 };
+  const trainingReqList = (s.training_required || []).map(a => [a.label, a.count]);
+  const assistanceList = (s.assistance_required || []).map(a => [a.label, a.count]);
+  const turnoverBracket = s.turnover_bracket || {};
+  const expensesBracket = s.expenses_bracket || {};
+  const cashCrops = s.cash_crops || {};
+  const informalCount = s.informal_count || 0;
 
   const printHeader = `<div class="print-header"><div class="ph-row">
     <div class="ph-seal"><img src="logo.svg" alt="ENB logo"></div>
@@ -579,7 +619,7 @@ function renderRecordsSummary() {
     </div>
   </div></div>`;
 
-  let html = printHeader + `<div class="warn-box">Summary of all ${total} record(s) currently stored on this device — updates automatically as more surveys are collected or imported.</div>`;
+  let html = printHeader + `<div class="warn-box">Summary of all ${total} record(s) in the shared database — computed live from the server, updates automatically.</div>`;
 
   html += `<div class="stat-grid">
     <div class="stat-card"><div class="num">${total}</div><div class="lbl">Total surveyed</div></div>
@@ -592,30 +632,27 @@ function renderRecordsSummary() {
     { label: 'Informal', value: byStatus.informal, color: '#D97706' },
     { label: 'No business', value: byStatus.none, color: '#B9B2A6' }
   ]);
-  html += trendChartHTML('Surveys Collected — Last 8 Weeks', computeWeeklyTrend(all, 8));
+  html += trendChartHTML('Surveys Collected — Last 8 Weeks', s.weekly_trend || []);
   html += stackedBarBlockHTML('By District (composition)', DISTRICTS.map(d => ({ label: d, ...byDistrictStatus[d] })));
   html += barBlockHTML('B. Employment', [
-    ['Total formally employed (reported)', totalFormallyEmployed],
-    ['Employed members listed (Table 1)', totalEmployedListed],
-    ['Unemployed qualified members listed (Table 2)', totalUnemployedListed]
+    ['Total formally employed (reported)', employment.total_formally_employed],
+    ['Employed members listed (Table 1)', employment.employed_listed],
+    ['Unemployed qualified members listed (Table 2)', employment.unemployed_listed]
   ]);
-  const topActivities = tallyEntries(activityTally).slice(0, 10);
   if (topActivities.length) html += barBlockHTML('C. Top Business Activities', topActivities);
   html += barBlockHTML('C. IPA Registration & Loans', [
-    ['IPA registered — Yes', ipaYes], ['IPA registered — No', ipaNo],
-    ['Loan access — Yes', loanYes], ['Loan access — No', loanNo]
+    ['IPA registered — Yes', ipaLoans.ipa_yes], ['IPA registered — No', ipaLoans.ipa_no],
+    ['Loan access — Yes', ipaLoans.loan_yes], ['Loan access — No', ipaLoans.loan_no]
   ]);
   html += barBlockHTML('D. Training & Development', [
-    ['Training attended — Yes', trainingYes], ['Training attended — No', trainingNo]
+    ['Training attended — Yes', training.attended_yes], ['Training attended — No', training.attended_no]
   ]);
-  const trainingReqList = tallyEntries(trainingReqTally);
   if (trainingReqList.length) html += barBlockHTML('Training Required (demand)', trainingReqList, { accent: true });
-  const assistanceList = tallyEntries(assistanceTally);
   if (assistanceList.length) html += barBlockHTML('Assistance Required (demand)', assistanceList, { accent: true });
-  html += barBlockHTML('E. Monthly Turnover Bracket', TURNOVER_BRACKETS.map(([c, label]) => [label, turnoverTally[c] || 0]));
-  html += barBlockHTML('E. Monthly Expenses Bracket', EXPENSE_BRACKETS.map(([c, label]) => [label, expensesTally[c] || 0]));
-  html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${cropTotals[c].trees} trees)`, cropTotals[c].blocks]));
-  html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalEntryCount]]);
+  html += barBlockHTML('E. Monthly Turnover Bracket', TURNOVER_BRACKETS.map(([c, label]) => [label, turnoverBracket[c] || 0]));
+  html += barBlockHTML('E. Monthly Expenses Bracket', EXPENSE_BRACKETS.map(([c, label]) => [label, expensesBracket[c] || 0]));
+  html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${(cashCrops[c] && cashCrops[c].trees) || 0} trees)`, (cashCrops[c] && cashCrops[c].blocks) || 0]));
+  html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalCount]]);
   html += `<button class="btn btn-outline btn-full" id="btn-print-summary">Print / Save as PDF</button>`;
 
   container.innerHTML = html;
@@ -624,9 +661,12 @@ function renderRecordsSummary() {
 }
 
 /* -------------------------------- detail view ------------------------------- */
-function openDetail(id) {
-  const r = recordsCache.find(x => x.id === id) || loadRecords().find(x => x.id === id);
-  if (!r) return;
+async function openDetail(id) {
+  let r = recordsCache.find(x => x.id === id);
+  if (!r) {
+    try { r = await fetchRecordById(id); }
+    catch (e) { console.error('Failed to load record:', e); toast('Could not load record — check your connection'); return; }
+  }
   switchView('detail');
   const status = r.businessStatus || 'none';
   const statusLabel = status === 'formal' ? 'Formal business' : status === 'informal' ? 'Informal sector' : 'No business';
@@ -1188,7 +1228,7 @@ function renderStepReview(el) {
   el.innerHTML = html;
 }
 
-function saveDraftRecord() {
+async function saveDraftRecord() {
   const missing = [];
   if (!draft.location.district) missing.push('District');
   if (!draft.location.llg) missing.push('LLG');
@@ -1200,38 +1240,36 @@ function saveDraftRecord() {
     renderWizard();
     return;
   }
-  const dup = findDuplicateRecord(draft);
+  const dup = await checkDuplicateRemote(draft);
   if (dup) {
-    const proceed = confirm(`A record for Household No. ${draft.location.householdNo} in ${draft.location.llg} (Ward ${draft.location.ward || '—'}) already exists — collected ${fmtDate(dup.location.dateCollected)}. Save this as a separate entry anyway?`);
+    const proceed = confirm(`A record for Household No. ${draft.location.householdNo} in ${draft.location.llg} (Ward ${draft.location.ward || '—'}) already exists — collected ${fmtDate(dup.date_collected)}. Save this as a separate entry anyway?`);
     if (!proceed) return;
   }
   draft.updatedAt = new Date().toISOString();
-  let all = loadRecords();
-  const idx = all.findIndex(r => r.id === draft.id);
-  if (idx >= 0) all[idx] = draft; else all.push(draft);
-  saveRecords(all);
-  recordsCache = all;
+  try {
+    await upsertRecordRemote(draft);
+  } catch (err) {
+    console.error('Save failed:', err);
+    toast('Could not save — check your connection and try again');
+    return;
+  }
   clearDraft();
   stopAutosaveInterval();
-  toast(editingExisting ? 'Record updated' : 'Record saved to this device');
+  toast(editingExisting ? 'Record updated' : 'Record saved');
   switchView('dashboard');
-}
-
-function findDuplicateRecord(rec) {
-  return recordsCache.find(r => r.id !== rec.id &&
-    r.location.district === rec.location.district &&
-    r.location.llg === rec.location.llg &&
-    r.location.ward === rec.location.ward &&
-    r.location.householdNo === rec.location.householdNo &&
-    r.location.householdNo);
 }
 
 /* -------------------------------- transfer -------------------------------- */
 async function renderTransfer() {
-  recordsCache = loadRecords();
-  $('#transfer-record-count').textContent = recordsCache.length;
-  const bytes = new Blob([JSON.stringify(recordsCache)]).size;
-  $('#transfer-storage-size').textContent = bytes > 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(2) + ' MB' : Math.ceil(bytes / 1024) + ' KB';
+  $('#transfer-record-count').textContent = '…';
+  try {
+    const { count, error } = await sb.from('msme_records').select('id', { count: 'exact', head: true });
+    if (error) throw error;
+    $('#transfer-record-count').textContent = count;
+  } catch (e) {
+    console.error('Failed to load record count:', e);
+    $('#transfer-record-count').textContent = '—';
+  }
   const { data: { user } } = await sb.auth.getUser();
   const emailEl = $('#account-email');
   if (emailEl) emailEl.textContent = user ? user.email : '—';
@@ -1244,18 +1282,36 @@ $('#btn-sign-out').addEventListener('click', async () => {
   document.body.classList.add('locked');
   renderLoginForm();
 });
-$('#btn-export-json').addEventListener('click', () => {
-  const all = loadRecords();
-  if (all.length === 0) { toast('No records to export yet'); return; }
-  const payload = { exportedAt: new Date().toISOString(), source: 'ENB MSME Survey (offline)', recordCount: all.length, records: all };
-  downloadFile(`enb-msme-export-${todayStr()}.json`, JSON.stringify(payload, null, 2), 'application/json');
-  toast('JSON exported — share this file with HQ');
+$('#btn-export-json').addEventListener('click', async () => {
+  const btn = $('#btn-export-json');
+  btn.disabled = true;
+  try {
+    const all = await fetchAllRecords();
+    if (all.length === 0) { toast('No records to export yet'); return; }
+    const payload = { exportedAt: new Date().toISOString(), source: 'ENB MSME Survey (offline)', recordCount: all.length, records: all };
+    downloadFile(`enb-msme-export-${todayStr()}.json`, JSON.stringify(payload, null, 2), 'application/json');
+    toast('JSON exported — share this file with HQ');
+  } catch (e) {
+    console.error('Export failed:', e);
+    toast('Could not export — check your connection');
+  } finally {
+    btn.disabled = false;
+  }
 });
-$('#btn-export-csv').addEventListener('click', () => {
-  const all = loadRecords();
-  if (all.length === 0) { toast('No records to export yet'); return; }
-  downloadFile(`enb-msme-export-${todayStr()}.csv`, recordsToCSV(all), 'text/csv');
-  toast('CSV exported');
+$('#btn-export-csv').addEventListener('click', async () => {
+  const btn = $('#btn-export-csv');
+  btn.disabled = true;
+  try {
+    const all = await fetchAllRecords();
+    if (all.length === 0) { toast('No records to export yet'); return; }
+    downloadFile(`enb-msme-export-${todayStr()}.csv`, recordsToCSV(all), 'text/csv');
+    toast('CSV exported');
+  } catch (e) {
+    console.error('Export failed:', e);
+    toast('Could not export — check your connection');
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // Turns an array of row-objects into one readable cell: "entry 1 | entry 2 | ..."
@@ -1346,21 +1402,21 @@ $('#import-file-input').addEventListener('change', async (e) => {
       }
       if (!Array.isArray(incoming) || incoming.length === 0) throw new Error('No records found in file');
 
-      let existing = loadRecords().slice();
-      let added = 0, updated = 0;
-      incoming.forEach(rec => {
-        if (!rec.id) return;
-        const idx = existing.findIndex(r => r.id === rec.id);
-        if (idx >= 0) { existing[idx] = rec; updated++; }
-        else { existing.push(rec); added++; }
-      });
+      const incomingIds = incoming.map(r => r.id).filter(Boolean);
+      const { data: existingRows, error: existErr } = await sb.from('msme_records').select('id').in('id', incomingIds);
+      if (existErr) throw existErr;
+      const existingIdSet = new Set((existingRows || []).map(r => r.id));
+      const added = incoming.filter(r => r.id && !existingIdSet.has(r.id)).length;
+      const updated = incoming.filter(r => r.id && existingIdSet.has(r.id)).length;
 
-      await persistRecords(incoming); // push just the new/changed rows to Supabase
-      recordsCache = existing;
+      await persistRecords(incoming); // upsert just the imported rows
+
+      const { count: totalCount } = await sb.from('msme_records').select('id', { count: 'exact', head: true });
 
       log.hidden = false;
-      log.textContent = `Import complete.\n${added} new record(s) added.\n${updated} existing record(s) updated.\nTotal in database: ${existing.length}`;
+      log.textContent = `Import complete.\n${added} new record(s) added.\n${updated} existing record(s) updated.\nTotal in database: ${totalCount}`;
       renderTransfer();
+      renderDashboard();
       toast('Import complete');
     } catch (err) {
       log.hidden = false;
@@ -1428,13 +1484,7 @@ async function handleLogin(email, password) {
 }
 
 async function finishLogin() {
-  try {
-    recordsCache = await fetchAllRecords();
-  } catch (e) {
-    console.error('Failed to load records:', e);
-    showLoginError('Signed in, but could not load records — check your connection and try again.');
-    return;
-  }
+  recordsCache = []; // no longer preloaded in full - Dashboard, Records, and Summary each fetch what they need
   $('#lock-screen').hidden = true;
   document.body.classList.remove('locked');
   renderDashboard();
