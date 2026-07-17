@@ -384,6 +384,41 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 .lock-warn{ background:var(--accent-light); color:#8A4A05; font-size:12px; border-radius:8px; padding:10px; margin-bottom:14px; text-align:left; }
 .lock-forgot{ margin-top:16px; font-size:12.5px; color:var(--text-muted); background:none; border:none; text-decoration:underline; padding:6px; }
 
+/* ===== Desktop layout (HQ only) ===== */
+/* Below 900px, everything above behaves exactly as before — this block only
+   changes things on wider screens, so the phone experience is untouched. */
+@media (min-width: 900px){
+  .bottomnav{
+    position:fixed; top:0; left:0; bottom:0; right:auto; z-index:15;
+    width:220px; padding:82px 10px 16px; padding-bottom:16px;
+    flex-direction:column; align-items:stretch; gap:3px;
+    border-top:none; border-right:1px solid var(--border);
+  }
+  .bottomnav button{
+    flex-direction:row; justify-content:flex-start; gap:10px;
+    padding:11px 12px; border-radius:8px; font-size:13px;
+  }
+  .bottomnav button .ic{font-size:17px;}
+  .bottomnav button.active{background:var(--primary-light);}
+
+  #view-dashboard, #view-records, #view-wizard, #view-transfer{ margin-left:220px; }
+  #view-detail{ margin-left:220px; }
+
+  /* Two-pane Records: only engaged while a detail record is actually open
+     alongside the list (toggled via body.two-pane in JS) — otherwise the
+     Records view just uses the normal centered layout, wider sidebar aside. */
+  body.two-pane #view-records{
+    position:fixed; top:67px; left:220px; bottom:0; width:420px;
+    max-width:420px; margin:0; overflow-y:auto; padding:16px;
+    border-right:1px solid var(--border);
+  }
+  body.two-pane #view-detail{
+    position:fixed; top:67px; left:640px; right:0; bottom:0;
+    margin:0; max-width:none; overflow-y:auto; padding:24px;
+  }
+  body.two-pane #view-detail #detail-body{ max-width:780px; }
+}
+
 @media print{
   .topbar, .bottomnav, .wizard-nav, .toast{display:none !important;}
   .print-only{display:block;}
@@ -393,7 +428,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 }
 </style>
 </head>
-<body data-role="enumerator">
+<body data-role="hq">
 
 <div id="lock-screen" class="lock-screen" hidden>
   <div class="lock-card">
@@ -406,7 +441,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <div class="brand">
     <div class="seal"><img src="logo.svg" alt="ENB Commerce & Industry logo"></div>
     <div class="brand-text">
-      <div class="t1" id="brand-llg-label">Commerce &amp; Industry</div>
+      <div class="t1">Commerce &amp; Industry</div>
       <div class="t2">MSME Survey</div>
     </div>
   </div>
@@ -459,7 +494,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 </div>
 
 <div id="view-transfer" class="view" hidden>
-  <div class="section-title">Offline status</div>
+  <div class="section-title">Connection status</div>
   <div class="card" id="offline-readiness-card" style="display:flex; align-items:center; gap:12px;">
     <div style="font-size:22px;" id="offline-readiness-icon">⏳</div>
     <div style="flex:1;">
@@ -468,18 +503,9 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     </div>
   </div>
 
-  <div class="section-title">Upload to HQ</div>
-  <div class="card">
-    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Push your new records straight into the shared database whenever you have signal — no file, no email, no USB. Already-uploaded records won't be sent again.</p>
-    <div class="review-line"><span class="k">Status</span><span class="v" id="upload-status">No records yet</span></div>
-    <button class="btn btn-primary btn-full" style="margin-top:12px;" id="btn-upload-hq">Upload to HQ</button>
-    <button class="btn btn-outline btn-full" style="margin-top:8px;" id="btn-resync-hq">Resync all with HQ</button>
-    <p class="hint" style="margin-top:8px;">Only use Resync if HQ says a record you already sent is missing — it re-checks everything on this device, so it's slower than the regular upload above.</p>
-  </div>
-
   <div class="section-title">Send data to HQ</div>
   <div class="card">
-    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Alternative to the upload above — export a file and share it manually by email, USB, or Bluetooth.</p>
+    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Export everything collected on this device. Share the file by email, USB, or Bluetooth when you reach connectivity or a computer.</p>
     <button class="row-action" id="btn-export-json"><div class="icon">📤</div><div class="txt"><strong>Export all as JSON</strong><span>Full backup — for re-import into this app at HQ</span></div><div class="chev">›</div></button>
     <button class="row-action" id="btn-export-csv"><div class="icon">📊</div><div class="txt"><strong>Export all as CSV</strong><span>Open in Excel / Google Sheets</span></div><div class="chev">›</div></button>
   </div>
@@ -498,28 +524,16 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     </div>
   </div>
 
-  <div class="section-title">Device Assignment</div>
+  <div class="section-title">Account</div>
   <div class="card">
-    <div class="review-line"><span class="k">This device is assigned to</span><span class="v" id="assigned-llg-display">—</span></div>
-    <button class="btn btn-outline btn-full" style="margin-top:10px;" id="btn-change-llg">Change LLG Assignment</button>
-    <p class="hint" style="margin-top:8px;">Only changes NEW surveys going forward — existing records keep their original LLG. Requires your PIN.</p>
+    <div class="review-line"><span class="k">Signed in as</span><span class="v" id="account-email">—</span></div>
+    <button class="btn btn-outline btn-full" style="margin-top:12px;" id="btn-sign-out">Sign out</button>
   </div>
 
-  <div class="section-title">Security</div>
+  <div class="section-title">Database</div>
   <div class="card">
-    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">This device's survey data is encrypted with your PIN.</p>
-    <div style="display:flex; gap:8px;">
-      <button class="btn btn-outline" style="flex:1;" id="btn-lock-device">Lock this device</button>
-      <button class="btn btn-outline" style="flex:1;" id="btn-change-pin">Change PIN</button>
-    </div>
-  </div>
-
-  <div class="section-title">Device data</div>
-  <div class="card">
-    <div class="review-line"><span class="k">Records stored on this device</span><span class="v" id="transfer-record-count">0</span></div>
-    <div class="review-line"><span class="k">Storage used (approx.)</span><span class="v" id="transfer-storage-size">0 KB</span></div>
-    <button class="btn btn-danger btn-full" style="margin-top:12px;" id="btn-clear-all">Erase all records from this device</button>
-    <p class="hint" style="margin-top:8px;">Only erase after confirming your export was received at HQ.</p>
+    <div class="review-line"><span class="k">Records in database</span><span class="v" id="transfer-record-count">0</span></div>
+    <p class="hint" style="margin-top:8px;">This is the shared provincial database — deleting a record here removes it for everyone. Use a record's own Delete button if you need to remove one.</p>
   </div>
 </div>
 

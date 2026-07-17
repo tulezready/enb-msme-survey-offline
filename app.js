@@ -3,10 +3,8 @@
    All data lives in localStorage on this device. No network calls, ever.
    ========================================================================= */
 
-const STORAGE_KEY = 'enb_msme_records_v1';
+const STORAGE_KEY = 'enb_msme_draft_cache_v1'; // local draft-only cache now, not the source of truth
 const DRAFT_KEY = 'enb_msme_draft_v1';
-const VAULT_META_KEY = 'enb_msme_vault_meta_v1';
-const PBKDF2_ITERATIONS = 150000;
 const APP_ROLE = (document.body && document.body.dataset.role) || 'hq'; // 'hq' | 'enumerator'
 const DISTRICTS = ['Gazelle', 'Kokopo', 'Pomio', 'Rabaul'];
 const LLG_BY_DISTRICT = {
@@ -65,49 +63,10 @@ function wardOptionsHTML(llg, currentWard) {
   return opts;
 }
 
-/* ---------------------------- device LLG assignment ----------------------------
-   Each device is locked to one LLG at setup — District/LLG are then fixed on
-   every new survey, only Ward stays free per household. This removes an
-   entire class of mistake (picking the wrong district/LLG) rather than
-   relying on care, and makes this device's own Summary meaningfully scoped
-   to just the LLG it's actually responsible for. */
-const ASSIGNED_LLG_KEY = 'enb_msme_assigned_llg_v1';
-function getAssignedLLG() {
-  try { return JSON.parse(localStorage.getItem(ASSIGNED_LLG_KEY)); } catch (e) { return null; }
-}
-function setAssignedLLG(district, llg) {
-  localStorage.setItem(ASSIGNED_LLG_KEY, JSON.stringify({ district, llg }));
-}
-// Used only for the one-time migration prompt on devices that already had
-// data before this feature existed — suggests (never assumes) an LLG based
-// on whatever's already been collected, so it's a confirm-tap, not blind entry.
-function inferLLGFromRecords(records) {
-  const tally = {};
-  (records || []).forEach(r => {
-    if (r.location && r.location.district && r.location.llg) {
-      const key = r.location.district + '|||' + r.location.llg;
-      tally[key] = (tally[key] || 0) + 1;
-    }
-  });
-  let best = null, bestCount = 0;
-  Object.entries(tally).forEach(([key, count]) => { if (count > bestCount) { bestCount = count; best = key; } });
-  if (!best) return null;
-  const [district, llg] = best.split('|||');
-  return { district, llg };
-}
-
-// Supabase project — used ONLY for the one-way "Upload to HQ" feature below.
-// This device has no login; the anon key here can only INSERT new records
-// (enforced by an insert-only RLS policy), never read, edit, or delete
-// anything already in the shared database.
+// Supabase project: tulezready's enb-msme-survey
 const SUPABASE_URL = 'https://lgfdzxcawggxrqvsgzpz.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_cX_rXW51KpL-k9arZupk9w_6MS9Jlo_';
-// If the CDN library hasn't loaded yet (e.g. fresh install with no signal),
-// sb stays null — the whole app (survey wizard, dashboard, everything)
-// must keep working regardless. Only uploadToHQ() needs sb, and it checks.
-const sb = (typeof window.supabase !== 'undefined')
-  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const BUSINESS_ACTIVITIES = {
   general: { label: 'Commerce & Services', items: ['Trade store','Wholesale','Fast food outlet','Second hand clothing shop','Liquor / Bottle shop','Bakery','Service station','PMV / Transport / Taxi services','Pest Control','Professional services (accountancy/consultancy)','Tailoring','Coffin Making','Mechanical Workshop','Contracting services','Communication Towers'] },
@@ -143,167 +102,52 @@ function stepsForStatus(status) {
   return ['A', 'B', 'F', 'REVIEW'];
 }
 
-/* ---------------------------- crypto layer ----------------------------
-   Records are encrypted at rest with AES-256-GCM. The key is derived from
-   the device PIN via PBKDF2 and only ever kept in memory (cryptoKey) —
-   it is never written to storage. This device still does everything
-   fully offline; the only network call anywhere in this app is the
-   optional "Upload to HQ" button below, and only when you tap it. */
-let cryptoKey = null; // CryptoKey, set only after a correct PIN is entered this session
-
-function bytesToBase64(bytes) {
-  let binary = '';
-  bytes.forEach(b => binary += String.fromCharCode(b));
-  return btoa(binary);
-}
-function base64ToBytes(b64) {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-async function deriveKey(pin, saltB64, iterations) {
-  const enc = new TextEncoder();
-  const salt = base64ToBytes(saltB64);
-  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(pin), { name: 'PBKDF2' }, false, ['deriveKey']);
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
-    keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-  );
-}
-async function encryptJSON(key, obj) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = new TextEncoder().encode(JSON.stringify(obj));
-  const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
-  return { iv: bytesToBase64(iv), ct: bytesToBase64(new Uint8Array(ctBuf)) };
-}
-async function decryptJSON(key, envelope) {
-  const iv = base64ToBytes(envelope.iv);
-  const ctBytes = base64ToBytes(envelope.ct);
-  const ptBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ctBytes);
-  return JSON.parse(new TextDecoder().decode(ptBuf));
-}
-
-/* ---------------------------- IndexedDB layer ----------------------------
-   Records live in IndexedDB now, not localStorage — one entry per record,
-   not one giant blob. IndexedDB's quota is in the hundreds of MB to low GB
-   (tied to device disk space), versus localStorage's fixed ~5-10MB per
-   origin. Storing per-record also means saving one household only ever
-   encrypts and writes that one record, not the entire dataset — so save
-   time stays roughly constant instead of growing as the device fills up. */
-const IDB_NAME = 'enb_msme_db_v1';
-const IDB_STORE = 'records';
-let idbPromise = null;
-function openIDB() {
-  if (idbPromise) return idbPromise;
-  idbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(IDB_NAME, 1);
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE, { keyPath: 'id' });
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  return idbPromise;
-}
-function idbPut(entry) {
-  return openIDB().then(db => new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readwrite');
-    tx.objectStore(IDB_STORE).put(entry);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  }));
-}
-function idbDelete(id) {
-  return openIDB().then(db => new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readwrite');
-    tx.objectStore(IDB_STORE).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  }));
-}
-function idbGetAll() {
-  return openIDB().then(db => new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readonly');
-    const req = tx.objectStore(IDB_STORE).getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error);
-  }));
-}
-function idbClear() {
-  return openIDB().then(db => new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readwrite');
-    tx.objectStore(IDB_STORE).clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  }));
-}
-
 /* ---------------------------- storage layer ----------------------------
-   recordsCache is the live, decrypted, in-memory source of truth for
-   everything the UI renders — kept in sync on every write, so all
-   existing synchronous reads throughout the app keep working unchanged.
-   Only the persistence side changed: upsert/delete touch one IndexedDB
-   entry, not the whole dataset. */
+   recordsCache is the live, in-memory source of truth for everything the
+   UI renders — kept in sync on every write so existing synchronous reads
+   throughout the app keep working unchanged. saveRecords() pushes the
+   whole current array to Supabase (upsert by id) — fine at this scale.
+   Deletions go through deleteRecordRemote() explicitly, since upsert alone
+   can't remove rows. Drafts stay local-only (plain, unsynced) — they're
+   just in-progress wizard state, not part of the shared dataset. */
 function loadRecords() { return recordsCache; }
 
-// Save/update ONE record — the normal path for every survey saved in the field.
-function upsertRecordLocal(record) {
+function saveRecords(records) {
+  recordsCache = records;
+  persistRecords(records).catch(err => { console.error('Save failed:', err); toast('Could not save to the database — check your connection'); });
+}
+async function persistRecords(records) {
+  if (records.length === 0) return;
+  const rows = records.map(recordToRow);
+  const { error } = await sb.from('msme_records').upsert(rows, { onConflict: 'id' });
+  if (error) throw error;
+}
+// Single-record save — updates just this one row remotely and merges it into
+// whatever's currently cached, rather than replacing the whole cache (which
+// no longer holds "everything" now that Dashboard/Records/Summary each fetch
+// only what they need).
+async function upsertRecordRemote(record) {
   const idx = recordsCache.findIndex(r => r.id === record.id);
   if (idx >= 0) recordsCache[idx] = record; else recordsCache.push(record);
-  encryptJSON(cryptoKey, record)
-    .then(envelope => idbPut({ id: record.id, envelope }))
-    .catch(err => { console.error('Save failed:', err); toast('Could not save — try again'); });
+  const { error } = await sb.from('msme_records').upsert(recordToRow(record), { onConflict: 'id' });
+  if (error) throw error;
 }
-// Remove ONE record locally (does not touch the shared database).
-function deleteRecordLocal(id) {
-  recordsCache = recordsCache.filter(r => r.id !== id);
-  idbDelete(id).catch(err => console.error('Local delete failed:', err));
+async function checkDuplicateRemote(rec) {
+  try {
+    let query = sb.from('msme_records').select('id, date_collected')
+      .eq('district', rec.location.district)
+      .eq('llg', rec.location.llg)
+      .eq('household_no', rec.location.householdNo)
+      .neq('id', rec.id || '');
+    if (rec.location.ward) query = query.eq('ward', rec.location.ward);
+    const { data, error } = await query.limit(1);
+    if (error) throw error;
+    return (data && data[0]) || null;
+  } catch (e) {
+    console.error('Duplicate check failed (continuing without it):', e);
+    return null;
+  }
 }
-// Bulk-replace everything — only used for PIN setup/migration and PIN change,
-// where every record genuinely does need re-encrypting under a new key.
-async function persistAllRecordsBulk(records) {
-  await idbClear();
-  await Promise.all(records.map(r => encryptJSON(cryptoKey, r).then(envelope => idbPut({ id: r.id, envelope }))));
-}
-async function loadAllRecordsFromIDB() {
-  const entries = await idbGetAll();
-  if (entries.length === 0) return [];
-  // No per-entry catch here on purpose: if the PIN is wrong, every decrypt
-  // fails and this must reject the whole unlock attempt, not silently
-  // return an empty list that looks like "no records yet".
-  return Promise.all(entries.map(e => decryptJSON(cryptoKey, e.envelope)));
-}
-async function clearAllRecordsLocal() {
-  await idbClear();
-  recordsCache = [];
-}
-
-function saveDraft(d) {
-  persistDraft(d).catch(err => console.error('Draft save failed:', err));
-}
-async function persistDraft(d) {
-  if (!cryptoKey) return;
-  if (d == null) { localStorage.removeItem(DRAFT_KEY); return; }
-  const envelope = await encryptJSON(cryptoKey, d);
-  localStorage.setItem(DRAFT_KEY, JSON.stringify(envelope));
-}
-async function readDraft() {
-  if (!cryptoKey) return null;
-  const raw = localStorage.getItem(DRAFT_KEY);
-  if (!raw) return null;
-  try { return await decryptJSON(cryptoKey, JSON.parse(raw)); }
-  catch (e) { return null; }
-}
-function clearDraft() { localStorage.removeItem(DRAFT_KEY); }
-
-/* ---------------------------- upload to HQ ----------------------------
-   One-way, insert-only push to the shared database. No login needed —
-   the database policy only allows adding new rows, never reading, editing,
-   or deleting. Only records not yet uploaded (no syncedAt) are sent, and
-   only the ones that actually succeed get marked synced, so a dropped
-   connection midway just leaves the rest queued for next time. */
 function recordToRow(r) {
   return {
     id: r.id,
@@ -314,85 +158,41 @@ function recordToRow(r) {
     household_no: r.location.householdNo || null,
     business_status: r.businessStatus || null,
     date_collected: r.location.dateCollected || null,
+    business_name: (r.business && r.business.name) || null,
+    contact_person: r.location.contactPerson || null,
     data: r
   };
 }
-async function runUpload(records, label) {
-  if (!sb) { toast('Upload needs a connection at least once to set up — try again when online'); return; }
-  if (records.length === 0) { toast('Nothing to upload'); return; }
-  const btn = $('#btn-upload-hq');
-  const resyncBtn = $('#btn-resync-hq');
-  if (btn) btn.disabled = true;
-  if (resyncBtn) resyncBtn.disabled = true;
-  if (btn) btn.textContent = label;
-  let sentCount = 0, alreadyCount = 0, failCount = 0;
-  const now = new Date().toISOString();
-  const touched = [];
-  // Duplicate-ID conflict = HQ still has it (harmless no-op). No conflict =
-  // either genuinely new, or HQ deleted it and it just went back in — either
-  // way that's a legitimate "sent". This device can only ever add rows,
-  // never read, edit, or delete anything already in the shared database.
-  for (const r of records) {
-    try {
-      const { error } = await sb.from('msme_records').insert(recordToRow(r));
-      if (error) {
-        const isDuplicate = error.code === '23505' || /duplicate key/i.test(error.message || '');
-        if (isDuplicate) {
-          alreadyCount++;
-          if (!r.syncedAt) { r.syncedAt = now; touched.push(r); }
-        } else {
-          throw error;
-        }
-      } else {
-        r.syncedAt = now;
-        touched.push(r);
-        sentCount++;
-      }
-    } catch (err) {
-      console.error('Upload failed for', r.id, err);
-      failCount++;
-    }
-  }
-  // Only the records that actually changed get re-encrypted and rewritten —
-  // not the whole local dataset, however large it's grown.
-  await Promise.all(touched.map(r => upsertRecordLocal(r)));
-  renderTransfer();
-  if (btn) { btn.disabled = false; btn.textContent = 'Upload to HQ'; }
-  if (resyncBtn) { resyncBtn.disabled = false; resyncBtn.textContent = 'Resync all with HQ'; }
-  const parts = [];
-  if (sentCount) parts.push(`${sentCount} sent`);
-  if (alreadyCount) parts.push(`${alreadyCount} already at HQ`);
-  if (failCount) parts.push(`${failCount} failed`);
-  toast(parts.length ? parts.join(' · ') : 'Nothing to upload');
+async function deleteRecordRemote(id) {
+  const { error } = await sb.from('msme_records').delete().eq('id', id);
+  if (error) throw error;
+}
+async function fetchAllRecords() {
+  const { data, error } = await sb.from('msme_records').select('data').order('updated_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(row => row.data);
 }
 
-// Default, fast path — only records never confirmed sent. This is what keeps
-// "Upload to HQ" quick even once a device has hundreds of synced records
-// behind it, rather than re-attempting every single one on every tap.
-function uploadToHQ() {
-  const pending = loadRecords().filter(r => !r.syncedAt);
-  runUpload(pending, 'Uploading…');
+function saveDraft(d) {
+  try { d == null ? localStorage.removeItem(DRAFT_KEY) : localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); }
+  catch (e) { console.error('Draft save failed:', e); }
 }
-
-// Deliberate, occasional action — re-attempts every local record, including
-// already-synced ones, so a record HQ deleted can come back. Slower on a
-// device with a lot of history, which is exactly why it isn't the default.
-function resyncAllWithHQ() {
-  runUpload(loadRecords(), 'Resyncing…');
+async function readDraft() {
+  try { const raw = localStorage.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) : null; }
+  catch (e) { return null; }
 }
+function clearDraft() { localStorage.removeItem(DRAFT_KEY); }
 
 function uid() {
   return 'r_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
 function newRecord() {
-  const assigned = getAssignedLLG();
   return {
     id: uid(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    syncedAt: null, // set once this record has been uploaded to HQ
-    location: { district: (assigned && assigned.district) || '', llg: (assigned && assigned.llg) || '', village: '', ward: '', householdNo: '', dateCollected: todayStr(), contactPerson: '', mobile: '', postalAddress: '' },
+    location: { district: '', llg: '', village: '', ward: '', householdNo: '', dateCollected: todayStr(), contactPerson: '', mobile: '', postalAddress: '' },
     employment: { numFormallyEmployed: '', employedMembers: [], unemployedMembers: [], comments: '' },
     businessStatus: '', // 'formal' | 'informal' | 'none'
     business: {
@@ -462,8 +262,12 @@ function stopAutosaveInterval() {
 function switchView(view) {
   currentView = view;
   if (view !== 'wizard') stopAutosaveInterval();
+  const twoPane = window.innerWidth >= 900 && view === 'detail';
+  document.body.classList.toggle('two-pane', twoPane);
   ['dashboard', 'records', 'wizard', 'detail', 'transfer'].forEach(v => {
-    $('#view-' + v).hidden = (v !== view);
+    let shouldHide = (v !== view);
+    if (twoPane && v === 'records') shouldHide = false; // keep the list visible alongside the detail panel
+    $('#view-' + v).hidden = shouldHide;
   });
   $all('.bottomnav button').forEach(b => b.classList.remove('active'));
   const map = { dashboard: 'dashboard', records: 'records', wizard: 'wizard-new', detail: 'records', transfer: 'transfer' };
@@ -471,7 +275,7 @@ function switchView(view) {
   if (navBtn) navBtn.classList.add('active');
   window.scrollTo(0, 0);
   if (view === 'dashboard') renderDashboard();
-  if (view === 'records') renderRecordsList();
+  if (view === 'records' || twoPane) renderRecordsList();
   if (view === 'transfer') renderTransfer();
 }
 
@@ -510,9 +314,18 @@ async function startNewSurvey() {
   startAutosaveInterval();
 }
 
-function editRecord(id) {
-  const rec = recordsCache.find(r => r.id === id);
-  if (!rec) return;
+async function fetchRecordById(id) {
+  const { data, error } = await sb.from('msme_records').select('data').eq('id', id).single();
+  if (error) throw error;
+  return data.data;
+}
+
+async function editRecord(id) {
+  let rec = recordsCache.find(r => r.id === id);
+  if (!rec) {
+    try { rec = await fetchRecordById(id); }
+    catch (e) { console.error('Failed to load record for edit:', e); toast('Could not load record — check your connection'); return; }
+  }
   draft = JSON.parse(JSON.stringify(rec));
   editingExisting = true;
   stepIndex = 0;
@@ -522,25 +335,37 @@ function editRecord(id) {
 }
 
 /* ------------------------------- dashboard -------------------------------- */
-function renderDashboard() {
-  recordsCache = loadRecords();
-  $('#record-count-pill').textContent = recordsCache.length;
-  $('#stat-total').textContent = recordsCache.length;
-  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
-  $('#stat-week').textContent = recordsCache.filter(r => new Date(r.createdAt).getTime() >= weekAgo).length;
-  $('#stat-formal').textContent = recordsCache.filter(r => r.businessStatus === 'formal').length;
-  $('#stat-informal').textContent = recordsCache.filter(r => r.businessStatus === 'informal').length;
-
-  const byDistrict = {};
-  DISTRICTS.forEach(d => byDistrict[d] = 0);
-  recordsCache.forEach(r => { const d = r.location.district; if (d) byDistrict[d] = (byDistrict[d] || 0) + 1; });
+async function renderDashboard() {
   const dEl = $('#district-breakdown');
+  const rEl = $('#recent-list');
+  dEl.innerHTML = `<div class="review-line"><span class="k">Loading…</span><span class="v"></span></div>`;
+  rEl.innerHTML = '';
+
+  let stats;
+  try {
+    const { data, error } = await sb.rpc('get_dashboard_stats');
+    if (error) throw error;
+    stats = data;
+  } catch (e) {
+    console.error('Failed to load dashboard stats:', e);
+    dEl.innerHTML = `<div class="review-line"><span class="k">Could not load — check your connection</span><span class="v"></span></div>
+      <button class="btn btn-outline btn-full" style="margin-top:10px;" id="btn-retry-dashboard">Retry</button>`;
+    const retryBtn = $('#btn-retry-dashboard');
+    if (retryBtn) retryBtn.addEventListener('click', renderDashboard);
+    return;
+  }
+
+  $('#record-count-pill').textContent = stats.total;
+  $('#stat-total').textContent = stats.total;
+  $('#stat-week').textContent = stats.this_week;
+  $('#stat-formal').textContent = stats.formal;
+  $('#stat-informal').textContent = stats.informal;
+
   dEl.innerHTML = DISTRICTS.map(d => `
-    <div class="review-line"><span class="k">${esc(d)}</span><span class="v">${byDistrict[d] || 0}</span></div>
+    <div class="review-line"><span class="k">${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
   `).join('');
 
-  const recent = [...recordsCache].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 5);
-  const rEl = $('#recent-list');
+  const recent = stats.recent || [];
   if (recent.length === 0) {
     rEl.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No surveys recorded yet.<br>Tap "Start new survey" to begin.</p></div>`;
   } else {
@@ -567,18 +392,16 @@ function recordItemHTML(r) {
   const title = recordDisplayName(r);
   const sub = [r.location.village, r.business.name].filter(Boolean).join(' · ') || 'No further detail';
   const statusLabel = status === 'formal' ? 'Formal' : status === 'informal' ? 'Informal' : 'No business';
-  const syncNote = r.syncedAt ? '✓ Uploaded' : 'Not uploaded yet';
   return `<div class="record-item" data-id="${r.id}">
     <div class="badge ${status}">${esc(initials)}</div>
-    <div class="info"><strong>${esc(title)}</strong><span>${esc(sub)} · ${fmtDate(r.location.dateCollected)} · ${syncNote}</span></div>
+    <div class="info"><strong>${esc(title)}</strong><span>${esc(sub)} · ${fmtDate(r.location.dateCollected)}</span></div>
     <div class="status-tag ${status}">${statusLabel}</div>
   </div>`;
 }
 
-/* ------------------------------- records list ------------------------------ */
+/* ------------------------------ records list ------------------------------ */
 const RECORDS_PAGE_SIZE = 50;
-function renderRecordsList() {
-  recordsCache = loadRecords();
+async function renderRecordsList() {
   const chipsEl = $('#district-chips');
   const activeChip = renderRecordsList._chip || 'All';
   chipsEl.innerHTML = ['All', ...DISTRICTS].map(d =>
@@ -589,39 +412,49 @@ function renderRecordsList() {
     renderRecordsList();
   }));
 
-  const q = ($('#search-input').value || '').toLowerCase();
-  let list = recordsCache;
-  if (activeChip !== 'All') list = list.filter(r => r.location.district === activeChip);
-  if (q) {
-    list = list.filter(r => {
-      const hay = [r.location.village, r.location.householdNo, r.location.contactPerson, r.business.name, r.location.ward, r.location.llg].join(' ').toLowerCase();
-      return hay.includes(q);
-    });
-  }
-  list = [...list].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-
   if (renderRecordsList._resetPage !== false) renderRecordsList._page = 1;
   renderRecordsList._resetPage = true;
   const page = renderRecordsList._page || 1;
-  const visibleCount = Math.min(list.length, page * RECORDS_PAGE_SIZE);
-  const visible = list.slice(0, visibleCount);
+  const q = ($('#search-input').value || '').trim();
 
   const container = $('#records-list-container');
-  if (list.length === 0) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching records.</p></div>`;
-  } else {
-    let html = visible.map(recordItemHTML).join('');
-    if (visibleCount < list.length) {
-      html += `<button class="btn btn-outline btn-full" id="btn-load-more-records">Load more (${list.length - visibleCount} remaining)</button>`;
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+
+  try {
+    let query = sb.from('msme_records').select('data', { count: 'exact' }).order('updated_at', { ascending: false });
+    if (activeChip !== 'All') query = query.eq('district', activeChip);
+    if (q) {
+      const term = `%${q}%`;
+      query = query.or(`village.ilike.${term},household_no.ilike.${term},contact_person.ilike.${term},business_name.ilike.${term},ward.ilike.${term},llg.ilike.${term}`);
     }
-    container.innerHTML = html;
-    $all('.record-item', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
-    const loadMoreBtn = $('#btn-load-more-records');
-    if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => {
-      renderRecordsList._page = page + 1;
-      renderRecordsList._resetPage = false;
-      renderRecordsList();
-    });
+    query = query.range(0, page * RECORDS_PAGE_SIZE - 1);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    const list = (data || []).map(row => row.data);
+
+    if (list.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching records.</p></div>`;
+    } else {
+      let html = list.map(recordItemHTML).join('');
+      if (list.length < count) {
+        html += `<button class="btn btn-outline btn-full" id="btn-load-more-records">Load more (${count - list.length} remaining)</button>`;
+      }
+      container.innerHTML = html;
+      $all('.record-item', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
+      const loadMoreBtn = $('#btn-load-more-records');
+      if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => {
+        renderRecordsList._page = page + 1;
+        renderRecordsList._resetPage = false;
+        renderRecordsList();
+      });
+    }
+  } catch (e) {
+    console.error('Failed to load records:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load records — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-records');
+    if (retryBtn) retryBtn.addEventListener('click', () => { renderRecordsList._resetPage = false; renderRecordsList(); });
   }
 }
 let searchDebounceTimer = null;
@@ -658,6 +491,8 @@ function barBlockHTML(title, pairs, opts = {}) {
   return `<div class="review-block card"><h4>${esc(title)}</h4>${rows}</div>`;
 }
 
+// Donut chart via CSS conic-gradient — no library needed, prints fine with
+// the color-preservation rule already added to the print stylesheet.
 function donutChartHTML(title, segments) {
   const total = segments.reduce((s, seg) => s + (Number(seg.value) || 0), 0) || 1;
   let cursor = 0;
@@ -679,6 +514,8 @@ function donutChartHTML(title, segments) {
   </div>`;
 }
 
+// 100%-stacked composition bar per row (e.g. per district) — shows the mix
+// of formal/informal/none within each row rather than just a raw total.
 function stackedBarBlockHTML(title, rowsData) {
   const rows = rowsData.map(d => {
     const total = d.formal + d.informal + d.none;
@@ -703,6 +540,8 @@ function stackedBarBlockHTML(title, rowsData) {
   return `<div class="review-block card"><h4>${esc(title)}</h4>${rows}${legend}</div>`;
 }
 
+// Buckets records into the last N calendar weeks by date collected, so the
+// trend always shows a consistent recent window even if some weeks had zero.
 function computeWeeklyTrend(records, weeksBack = 8) {
   const now = new Date();
   const todayDow = now.getDay();
@@ -748,51 +587,45 @@ function trendChartHTML(title, buckets) {
   </div>`;
 }
 
-function renderRecordsSummary() {
-  const all = loadRecords();
-  const total = all.length;
+async function renderRecordsSummary() {
   const container = $('#records-summary-mode');
-  if (total === 0) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No records on this device yet.<br>The summary fills in once records are collected or imported.</p></div>`;
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading summary…</p></div>`;
+
+  let s;
+  try {
+    const { data, error } = await sb.rpc('get_summary_stats', { weeks_back: 8 });
+    if (error) throw error;
+    s = data;
+  } catch (e) {
+    console.error('Failed to load summary:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load summary — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-summary">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-summary');
+    if (retryBtn) retryBtn.addEventListener('click', renderRecordsSummary);
     return;
   }
 
-  const byDistrict = {}; DISTRICTS.forEach(d => byDistrict[d] = 0);
-  const byDistrictStatus = {}; DISTRICTS.forEach(d => byDistrictStatus[d] = { formal: 0, informal: 0, none: 0 });
-  const byStatus = { formal: 0, informal: 0, none: 0 };
-  let totalFormallyEmployed = 0, totalEmployedListed = 0, totalUnemployedListed = 0;
-  const activityTally = {};
-  let ipaYes = 0, ipaNo = 0, loanYes = 0, loanNo = 0, trainingYes = 0, trainingNo = 0;
-  const trainingReqTally = {}, assistanceTally = {};
-  const turnoverTally = {}; TURNOVER_BRACKETS.forEach(([c]) => turnoverTally[c] = 0);
-  const expensesTally = {}; EXPENSE_BRACKETS.forEach(([c]) => expensesTally[c] = 0);
-  const cropTotals = {}; FIXED_CROPS.forEach(c => cropTotals[c] = { blocks: 0, trees: 0 });
-  let informalEntryCount = 0;
+  const total = s.total || 0;
+  if (total === 0) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No records yet.<br>The summary fills in once records are collected or imported.</p></div>`;
+    return;
+  }
 
-  all.forEach(r => {
-    if (r.location.district) byDistrict[r.location.district] = (byDistrict[r.location.district] || 0) + 1;
-    if (r.businessStatus === 'formal') byStatus.formal++;
-    else if (r.businessStatus === 'informal') byStatus.informal++;
-    else if (r.businessStatus === 'none') byStatus.none++;
-    if (r.location.district && byDistrictStatus[r.location.district] && ['formal', 'informal', 'none'].includes(r.businessStatus)) {
-      byDistrictStatus[r.location.district][r.businessStatus]++;
-    }
+  const byStatus = s.by_status || { formal: 0, informal: 0, none: 0 };
+  const byDistrictStatus = {};
+  DISTRICTS.forEach(d => byDistrictStatus[d] = { formal: 0, informal: 0, none: 0 });
+  (s.by_district || []).forEach(row => { if (byDistrictStatus[row.label]) byDistrictStatus[row.label] = { formal: row.formal, informal: row.informal, none: row.none }; });
 
-    totalFormallyEmployed += Number(r.employment.numFormallyEmployed) || 0;
-    totalEmployedListed += r.employment.employedMembers.length;
-    totalUnemployedListed += r.employment.unemployedMembers.length;
-
-    Object.values(r.business.activities).forEach(v => { if (Array.isArray(v)) v.forEach(item => { activityTally[item] = (activityTally[item] || 0) + 1; }); });
-    if (r.business.ipaRegistered === 'Yes') ipaYes++; else if (r.business.ipaRegistered === 'No') ipaNo++;
-    if (r.business.loanAccess === 'Yes') loanYes++; else if (r.business.loanAccess === 'No') loanNo++;
-    if (r.development.trainingAttended === 'Yes') trainingYes++; else if (r.development.trainingAttended === 'No') trainingNo++;
-    (r.development.trainingTypesRequired || []).forEach(t => { trainingReqTally[t] = (trainingReqTally[t] || 0) + 1; });
-    (r.development.assistanceRequired || []).forEach(t => { assistanceTally[t] = (assistanceTally[t] || 0) + 1; });
-    if (r.economic.turnoverBracket) turnoverTally[r.economic.turnoverBracket] = (turnoverTally[r.economic.turnoverBracket] || 0) + 1;
-    if (r.economic.expensesBracket) expensesTally[r.economic.expensesBracket] = (expensesTally[r.economic.expensesBracket] || 0) + 1;
-    FIXED_CROPS.forEach(c => { const d = r.cashCrops.fixed[c]; if (d) { cropTotals[c].blocks += Number(d.blocks) || 0; cropTotals[c].trees += Number(d.trees) || 0; } });
-    informalEntryCount += (r.informal.entries || []).length;
-  });
+  const employment = s.employment || { total_formally_employed: 0, employed_listed: 0, unemployed_listed: 0 };
+  const topActivities = (s.top_activities || []).map(a => [a.label, a.count]);
+  const ipaLoans = s.ipa_loans || { ipa_yes: 0, ipa_no: 0, loan_yes: 0, loan_no: 0 };
+  const training = s.training || { attended_yes: 0, attended_no: 0 };
+  const trainingReqList = (s.training_required || []).map(a => [a.label, a.count]);
+  const assistanceList = (s.assistance_required || []).map(a => [a.label, a.count]);
+  const turnoverBracket = s.turnover_bracket || {};
+  const expensesBracket = s.expenses_bracket || {};
+  const cashCrops = s.cash_crops || {};
+  const informalCount = s.informal_count || 0;
 
   const printHeader = `<div class="print-header"><div class="ph-row">
     <div class="ph-seal"><img src="logo.svg" alt="ENB logo"></div>
@@ -802,8 +635,7 @@ function renderRecordsSummary() {
     </div>
   </div></div>`;
 
-  const assigned = getAssignedLLG();
-  let html = printHeader + `<div class="warn-box">Summary of all ${total} record(s) collected${assigned ? ` for <strong>${esc(assigned.llg)}</strong>` : ' on this device'} — updates automatically as more surveys are collected.</div>`;
+  let html = printHeader + `<div class="warn-box">Summary of all ${total} record(s) in the shared database — computed live from the server, updates automatically.</div>`;
 
   html += `<div class="stat-grid">
     <div class="stat-card"><div class="num">${total}</div><div class="lbl">Total surveyed</div></div>
@@ -816,35 +648,27 @@ function renderRecordsSummary() {
     { label: 'Informal', value: byStatus.informal, color: '#D97706' },
     { label: 'No business', value: byStatus.none, color: '#B9B2A6' }
   ]);
-  html += trendChartHTML('Surveys Collected — Last 8 Weeks', computeWeeklyTrend(all, 8));
-  // A device locked to one LLG will only ever have one populated district —
-  // the 4-district breakdown just isn't relevant here, so it's dropped.
-  // Kept as a fallback only for the unlikely case of an unassigned device.
-  if (!assigned) {
-    html += stackedBarBlockHTML('By District (composition)', DISTRICTS.map(d => ({ label: d, ...byDistrictStatus[d] })));
-  }
+  html += trendChartHTML('Surveys Collected — Last 8 Weeks', s.weekly_trend || []);
+  html += stackedBarBlockHTML('By District (composition)', DISTRICTS.map(d => ({ label: d, ...byDistrictStatus[d] })));
   html += barBlockHTML('B. Employment', [
-    ['Total formally employed (reported)', totalFormallyEmployed],
-    ['Employed members listed (Table 1)', totalEmployedListed],
-    ['Unemployed qualified members listed (Table 2)', totalUnemployedListed]
+    ['Total formally employed (reported)', employment.total_formally_employed],
+    ['Employed members listed (Table 1)', employment.employed_listed],
+    ['Unemployed qualified members listed (Table 2)', employment.unemployed_listed]
   ]);
-  const topActivities = tallyEntries(activityTally).slice(0, 10);
   if (topActivities.length) html += barBlockHTML('C. Top Business Activities', topActivities);
   html += barBlockHTML('C. IPA Registration & Loans', [
-    ['IPA registered — Yes', ipaYes], ['IPA registered — No', ipaNo],
-    ['Loan access — Yes', loanYes], ['Loan access — No', loanNo]
+    ['IPA registered — Yes', ipaLoans.ipa_yes], ['IPA registered — No', ipaLoans.ipa_no],
+    ['Loan access — Yes', ipaLoans.loan_yes], ['Loan access — No', ipaLoans.loan_no]
   ]);
   html += barBlockHTML('D. Training & Development', [
-    ['Training attended — Yes', trainingYes], ['Training attended — No', trainingNo]
+    ['Training attended — Yes', training.attended_yes], ['Training attended — No', training.attended_no]
   ]);
-  const trainingReqList = tallyEntries(trainingReqTally);
   if (trainingReqList.length) html += barBlockHTML('Training Required (demand)', trainingReqList, { accent: true });
-  const assistanceList = tallyEntries(assistanceTally);
   if (assistanceList.length) html += barBlockHTML('Assistance Required (demand)', assistanceList, { accent: true });
-  html += barBlockHTML('E. Monthly Turnover Bracket', TURNOVER_BRACKETS.map(([c, label]) => [label, turnoverTally[c] || 0]));
-  html += barBlockHTML('E. Monthly Expenses Bracket', EXPENSE_BRACKETS.map(([c, label]) => [label, expensesTally[c] || 0]));
-  html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${cropTotals[c].trees} trees)`, cropTotals[c].blocks]));
-  html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalEntryCount]]);
+  html += barBlockHTML('E. Monthly Turnover Bracket', TURNOVER_BRACKETS.map(([c, label]) => [label, turnoverBracket[c] || 0]));
+  html += barBlockHTML('E. Monthly Expenses Bracket', EXPENSE_BRACKETS.map(([c, label]) => [label, expensesBracket[c] || 0]));
+  html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${(cashCrops[c] && cashCrops[c].trees) || 0} trees)`, (cashCrops[c] && cashCrops[c].blocks) || 0]));
+  html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalCount]]);
   html += `<button class="btn btn-outline btn-full" id="btn-print-summary">Print / Save as PDF</button>`;
 
   container.innerHTML = html;
@@ -853,9 +677,12 @@ function renderRecordsSummary() {
 }
 
 /* -------------------------------- detail view ------------------------------- */
-function openDetail(id) {
-  const r = recordsCache.find(x => x.id === id) || loadRecords().find(x => x.id === id);
-  if (!r) return;
+async function openDetail(id) {
+  let r = recordsCache.find(x => x.id === id);
+  if (!r) {
+    try { r = await fetchRecordById(id); }
+    catch (e) { console.error('Failed to load record:', e); toast('Could not load record — check your connection'); return; }
+  }
   switchView('detail');
   const status = r.businessStatus || 'none';
   const statusLabel = status === 'formal' ? 'Formal business' : status === 'informal' ? 'Informal sector' : 'No business';
@@ -915,8 +742,9 @@ function openDetail(id) {
   $('#btn-detail-edit').onclick = () => editRecord(r.id);
   $('#btn-detail-back').onclick = () => switchView('records');
   $('#btn-detail-delete').onclick = () => {
-    if (confirm('Delete this record from this device? This cannot be undone.')) {
-      deleteRecordLocal(r.id);
+    if (confirm('Delete this record from the database? This cannot be undone and affects everyone using HQ.')) {
+      recordsCache = recordsCache.filter(x => x.id !== r.id);
+      deleteRecordRemote(r.id).catch(err => { console.error(err); toast('Could not delete — check your connection'); });
       toast('Record deleted');
       switchView('records');
     }
@@ -1027,17 +855,7 @@ function bindYN(root) {
 
 /* ---- Step A: Location ---- */
 function renderStepA(el) {
-  const locked = !!getAssignedLLG();
-  const locationHTML = locked ? `
-    <div class="field">
-      <label>District <span class="opt">(locked to this device)</span></label>
-      <input type="text" value="${esc(draft.location.district)}" disabled style="background:var(--surface-2); color:var(--text-muted);">
-    </div>
-    <div class="field">
-      <label>LLG <span class="opt">(locked to this device)</span></label>
-      <input type="text" value="${esc(draft.location.llg)}" disabled style="background:var(--surface-2); color:var(--text-muted);">
-    </div>
-  ` : `
+  el.innerHTML = `
     <div class="field">
       <label>District</label>
       <select data-bind="location.district" id="loc-district-select">
@@ -1045,19 +863,17 @@ function renderStepA(el) {
         ${DISTRICTS.map(d => `<option value="${d}">${d}</option>`).join('')}
       </select>
     </div>
-    <div class="field"><label>LLG</label>
-      <select data-bind="location.llg" id="loc-llg-select">
-        ${llgOptionsHTML(draft.location.district, draft.location.llg)}
-      </select>
-    </div>
-  `;
-
-  el.innerHTML = `
-    ${locationHTML}
-    <div class="field"><label>Ward</label>
-      <select data-bind="location.ward" id="loc-ward-select">
-        ${wardOptionsHTML(draft.location.llg, draft.location.ward)}
-      </select>
+    <div class="field-row">
+      <div class="field"><label>LLG</label>
+        <select data-bind="location.llg" id="loc-llg-select">
+          ${llgOptionsHTML(draft.location.district, draft.location.llg)}
+        </select>
+      </div>
+      <div class="field"><label>Ward</label>
+        <select data-bind="location.ward" id="loc-ward-select">
+          ${wardOptionsHTML(draft.location.llg, draft.location.ward)}
+        </select>
+      </div>
     </div>
     <div class="field"><label>Village</label><input type="text" data-bind="location.village"></div>
     <div class="field-row">
@@ -1073,18 +889,16 @@ function renderStepA(el) {
     <div class="field"><label>Postal address</label><textarea data-bind="location.postalAddress"></textarea></div>
   `;
   bindInputs(el);
-  if (!locked) {
-    $('#loc-district-select').addEventListener('change', () => {
-      draft.location.llg = ''; // old LLG almost certainly doesn't belong to the newly picked district
-      draft.location.ward = '';
-      $('#loc-llg-select').innerHTML = llgOptionsHTML(draft.location.district, draft.location.llg);
-      $('#loc-ward-select').innerHTML = wardOptionsHTML(draft.location.llg, draft.location.ward);
-    });
-    $('#loc-llg-select').addEventListener('change', () => {
-      draft.location.ward = ''; // old ward almost certainly doesn't belong to the newly picked LLG
-      $('#loc-ward-select').innerHTML = wardOptionsHTML(draft.location.llg, draft.location.ward);
-    });
-  }
+  $('#loc-district-select').addEventListener('change', () => {
+    draft.location.llg = ''; // old LLG almost certainly doesn't belong to the newly picked district
+    draft.location.ward = '';
+    $('#loc-llg-select').innerHTML = llgOptionsHTML(draft.location.district, draft.location.llg);
+    $('#loc-ward-select').innerHTML = wardOptionsHTML(draft.location.llg, draft.location.ward);
+  });
+  $('#loc-llg-select').addEventListener('change', () => {
+    draft.location.ward = ''; // old ward almost certainly doesn't belong to the newly picked LLG
+    $('#loc-ward-select').innerHTML = wardOptionsHTML(draft.location.llg, draft.location.ward);
+  });
 }
 
 /* ---- Step B: Employment & Education + business status ---- */
@@ -1430,7 +1244,7 @@ function renderStepReview(el) {
   el.innerHTML = html;
 }
 
-function saveDraftRecord() {
+async function saveDraftRecord() {
   const missing = [];
   if (!draft.location.district) missing.push('District');
   if (!draft.location.llg) missing.push('LLG');
@@ -1442,73 +1256,79 @@ function saveDraftRecord() {
     renderWizard();
     return;
   }
-  const dup = findDuplicateRecord(draft);
+  const dup = await checkDuplicateRemote(draft);
   if (dup) {
-    const proceed = confirm(`A record for Household No. ${draft.location.householdNo} in ${draft.location.llg} (Ward ${draft.location.ward || '—'}) already exists — collected ${fmtDate(dup.location.dateCollected)}. Save this as a separate entry anyway?`);
+    const proceed = confirm(`A record for Household No. ${draft.location.householdNo} in ${draft.location.llg} (Ward ${draft.location.ward || '—'}) already exists — collected ${fmtDate(dup.date_collected)}. Save this as a separate entry anyway?`);
     if (!proceed) return;
   }
   draft.updatedAt = new Date().toISOString();
-  upsertRecordLocal(draft);
+  try {
+    await upsertRecordRemote(draft);
+  } catch (err) {
+    console.error('Save failed:', err);
+    toast('Could not save — check your connection and try again');
+    return;
+  }
   clearDraft();
   stopAutosaveInterval();
-  toast(editingExisting ? 'Record updated' : 'Record saved to this device');
+  toast(editingExisting ? 'Record updated' : 'Record saved');
   switchView('dashboard');
 }
 
-function findDuplicateRecord(rec) {
-  return recordsCache.find(r => r.id !== rec.id &&
-    r.location.district === rec.location.district &&
-    r.location.llg === rec.location.llg &&
-    r.location.ward === rec.location.ward &&
-    r.location.householdNo === rec.location.householdNo &&
-    r.location.householdNo);
-}
-
 /* -------------------------------- transfer -------------------------------- */
-function renderTransfer() {
-  recordsCache = loadRecords();
-  $('#transfer-record-count').textContent = recordsCache.length;
-  const bytes = new Blob([JSON.stringify(recordsCache)]).size;
-  $('#transfer-storage-size').textContent = bytes > 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(2) + ' MB' : Math.ceil(bytes / 1024) + ' KB';
-  const pendingCount = recordsCache.filter(r => !r.syncedAt).length;
-  const syncEl = $('#upload-status');
-  if (syncEl) {
-    syncEl.textContent = pendingCount === 0
-      ? (recordsCache.length === 0 ? 'No records yet' : 'All records uploaded to HQ')
-      : `${pendingCount} of ${recordsCache.length} record(s) not yet uploaded`;
+async function renderTransfer() {
+  $('#transfer-record-count').textContent = '…';
+  try {
+    const { count, error } = await sb.from('msme_records').select('id', { count: 'exact', head: true });
+    if (error) throw error;
+    $('#transfer-record-count').textContent = count;
+  } catch (e) {
+    console.error('Failed to load record count:', e);
+    $('#transfer-record-count').textContent = '—';
   }
-  const assigned = getAssignedLLG();
-  const assignedEl = $('#assigned-llg-display');
-  if (assignedEl) assignedEl.textContent = assigned ? `${assigned.llg} (${assigned.district})` : 'Not set';
+  const { data: { user } } = await sb.auth.getUser();
+  const emailEl = $('#account-email');
+  if (emailEl) emailEl.textContent = user ? user.email : '—';
 }
-$('#btn-upload-hq').addEventListener('click', uploadToHQ);
-$('#btn-resync-hq').addEventListener('click', resyncAllWithHQ);
-$('#btn-lock-device').addEventListener('click', lockDevice);
-$('#btn-change-pin').addEventListener('click', changePin);
-$('#btn-change-llg').addEventListener('click', changeLLGAssignment);
-$('#btn-clear-all').addEventListener('click', () => {
-  if (confirm('This will permanently erase ALL survey records on this device. Make sure you have exported and sent them to HQ first. Continue?')) {
-    if (confirm('Are you absolutely sure? This cannot be undone.')) {
-      clearAllRecordsLocal().then(() => {
-        clearDraft();
-        toast('All records erased');
-        renderTransfer();
-      }).catch(err => { console.error('Erase failed:', err); toast('Could not erase — try again'); });
-    }
+$('#btn-sign-out').addEventListener('click', async () => {
+  clearTimeout(inactivityTimer);
+  await sb.auth.signOut();
+  recordsCache = [];
+  draft = null;
+  $('#lock-screen').hidden = false;
+  document.body.classList.add('locked');
+  renderLoginForm();
+});
+$('#btn-export-json').addEventListener('click', async () => {
+  const btn = $('#btn-export-json');
+  btn.disabled = true;
+  try {
+    const all = await fetchAllRecords();
+    if (all.length === 0) { toast('No records to export yet'); return; }
+    const payload = { exportedAt: new Date().toISOString(), source: 'ENB MSME Survey (offline)', recordCount: all.length, records: all };
+    downloadFile(`enb-msme-export-${todayStr()}.json`, JSON.stringify(payload, null, 2), 'application/json');
+    toast('JSON exported — share this file with HQ');
+  } catch (e) {
+    console.error('Export failed:', e);
+    toast('Could not export — check your connection');
+  } finally {
+    btn.disabled = false;
   }
 });
-$('#btn-export-json').addEventListener('click', () => {
-  const all = loadRecords();
-  if (all.length === 0) { toast('No records to export yet'); return; }
-  const payload = { exportedAt: new Date().toISOString(), source: 'ENB MSME Survey (offline)', recordCount: all.length, records: all };
-  downloadFile(`enb-msme-export-${todayStr()}.json`, JSON.stringify(payload, null, 2), 'application/json');
-  toast('JSON exported — share this file with HQ');
-});
-$('#btn-export-csv').addEventListener('click', () => {
-  const all = loadRecords();
-  if (all.length === 0) { toast('No records to export yet'); return; }
-  downloadFile(`enb-msme-export-${todayStr()}.csv`, recordsToCSV(all), 'text/csv');
-  toast('CSV exported');
+$('#btn-export-csv').addEventListener('click', async () => {
+  const btn = $('#btn-export-csv');
+  btn.disabled = true;
+  try {
+    const all = await fetchAllRecords();
+    if (all.length === 0) { toast('No records to export yet'); return; }
+    downloadFile(`enb-msme-export-${todayStr()}.csv`, recordsToCSV(all), 'text/csv');
+    toast('CSV exported');
+  } catch (e) {
+    console.error('Export failed:', e);
+    toast('Could not export — check your connection');
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // Turns an array of row-objects into one readable cell: "entry 1 | entry 2 | ..."
@@ -1579,11 +1399,11 @@ function downloadFile(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-$('#import-file-input').addEventListener('change', (e) => {
+$('#import-file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     const log = $('#import-log');
     try {
       const data = JSON.parse(reader.result);
@@ -1599,21 +1419,25 @@ $('#import-file-input').addEventListener('change', (e) => {
       }
       if (!Array.isArray(incoming) || incoming.length === 0) throw new Error('No records found in file');
 
-      let added = 0, updated = 0;
-      incoming.forEach(rec => {
-        if (!rec.id) return;
-        const exists = recordsCache.some(r => r.id === rec.id);
-        upsertRecordLocal(rec);
-        if (exists) updated++; else added++;
-      });
+      const incomingIds = incoming.map(r => r.id).filter(Boolean);
+      const { data: existingRows, error: existErr } = await sb.from('msme_records').select('id').in('id', incomingIds);
+      if (existErr) throw existErr;
+      const existingIdSet = new Set((existingRows || []).map(r => r.id));
+      const added = incoming.filter(r => r.id && !existingIdSet.has(r.id)).length;
+      const updated = incoming.filter(r => r.id && existingIdSet.has(r.id)).length;
+
+      await persistRecords(incoming); // upsert just the imported rows
+
+      const { count: totalCount } = await sb.from('msme_records').select('id', { count: 'exact', head: true });
 
       log.hidden = false;
-      log.textContent = `Import complete.\n${added} new record(s) added.\n${updated} existing record(s) updated.\nTotal on device: ${recordsCache.length}`;
+      log.textContent = `Import complete.\n${added} new record(s) added.\n${updated} existing record(s) updated.\nTotal in database: ${totalCount}`;
       renderTransfer();
+      renderDashboard();
       toast('Import complete');
     } catch (err) {
       log.hidden = false;
-      log.textContent = 'Import failed: ' + err.message + '\nMake sure this is a JSON file exported from this app.';
+      log.textContent = 'Import failed: ' + err.message + '\nMake sure this is a JSON file exported from the offline app, and that you have a connection.';
     }
     e.target.value = '';
   };
@@ -1621,346 +1445,97 @@ $('#import-file-input').addEventListener('change', (e) => {
 });
 
 
-/* ---------------------------- offline readiness --------------------------- */
-let offlineReady = false;
-function setOfflineStatus(ready, note) {
-  offlineReady = ready;
+/* ---------------------------- connection status --------------------------- */
+function setConnectionStatus(online) {
   const dot = $('#offline-dot');
   const text = $('#offline-status-text');
-  if (dot) dot.style.background = ready ? '#8FD9A8' : '#F2C879';
-  if (text) text.textContent = ready ? 'Ready offline' : 'Preparing…';
+  if (dot) dot.style.background = online ? '#8FD9A8' : '#E06B5C';
+  if (text) text.textContent = online ? 'Online' : 'Offline';
 
   const icon = $('#offline-readiness-icon');
   const title = $('#offline-readiness-title');
   const desc = $('#offline-readiness-desc');
   const card = $('#offline-readiness-card');
   if (!icon) return;
-  if (ready) {
+  if (online) {
     icon.textContent = '✅';
-    title.textContent = 'Ready to work offline';
-    desc.textContent = 'The app is fully cached on this device. Safe to switch off data now.';
+    title.textContent = 'Connected';
+    desc.textContent = 'Signed-in access to the shared database is working normally.';
     card.style.borderColor = 'var(--success)';
   } else {
-    icon.textContent = '⏳';
-    title.textContent = 'Not fully cached yet';
-    desc.textContent = note || 'Stay connected for a moment while the app finishes storing itself on this device.';
-    card.style.borderColor = 'var(--accent)';
+    icon.textContent = '⚠️';
+    title.textContent = 'No connection';
+    desc.textContent = "This app needs internet to sign in and to load or save records — reconnect and try again.";
+    card.style.borderColor = 'var(--danger)';
   }
 }
 
-/* ------------------------------- PIN lock screen ------------------------------- */
-function showLockError(msg) {
+/* ------------------------------- login screen ------------------------------- */
+function showLoginError(msg) {
   const el = $('#lock-error');
   if (el) el.textContent = msg || '';
 }
 
-function renderSetupForm(existingCount, legacyRecords) {
-  const inferred = legacyRecords && legacyRecords.length ? inferLLGFromRecords(legacyRecords) : null;
+function renderLoginForm() {
   const c = $('#lock-content');
   c.innerHTML = `
-    <h3>Set up this device</h3>
-    <p class="lock-desc">Each device is assigned to one LLG, so every survey it collects is automatically attributed correctly — no picking the wrong LLG by mistake.</p>
-    <div class="field" style="text-align:left; margin-bottom:10px;">
-      <label style="display:block; font-size:12.5px; font-weight:600; margin-bottom:5px;">District</label>
-      <select id="setup-district-select" style="width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface);">
-        <option value="">Select district…</option>
-        ${DISTRICTS.map(d => `<option value="${d}" ${inferred && inferred.district === d ? 'selected' : ''}>${d}</option>`).join('')}
-      </select>
-    </div>
-    <div class="field" style="text-align:left; margin-bottom:14px;">
-      <label style="display:block; font-size:12.5px; font-weight:600; margin-bottom:5px;">LLG</label>
-      <select id="setup-llg-select" style="width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface);">
-        ${llgOptionsHTML(inferred ? inferred.district : '', inferred ? inferred.llg : '')}
-      </select>
-    </div>
-    ${existingCount > 0 ? `<div class="lock-warn">This device already has ${existingCount} record(s) saved. They'll be encrypted with the PIN you set now.</div>` : ''}
-    <div class="lock-warn">If you forget this PIN, the data on this device cannot be recovered — there is no reset. Write it down somewhere safe.</div>
-    <input type="password" inputmode="numeric" pattern="[0-9]*" id="pin-setup-1" placeholder="Choose a PIN (4–8 digits)" maxlength="8">
-    <input type="password" inputmode="numeric" pattern="[0-9]*" id="pin-setup-2" placeholder="Confirm PIN" maxlength="8">
+    <h3>HQ Sign In</h3>
+    <p class="lock-desc">Sign in with your ENB Commerce &amp; Industry account.</p>
+    <input type="email" id="login-email" placeholder="Email" autocomplete="username" style="width:100%; text-align:center; font-size:16px; letter-spacing:normal; padding:12px; border:1.5px solid var(--border); border-radius:10px; margin-bottom:10px;">
+    <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" style="width:100%; text-align:center; font-size:16px; letter-spacing:normal; padding:12px; border:1.5px solid var(--border); border-radius:10px; margin-bottom:10px;">
     <div class="lock-error" id="lock-error"></div>
-    <button class="btn btn-primary btn-full" id="btn-pin-setup">Secure this device</button>
+    <button class="btn btn-primary btn-full" id="btn-login">Sign in</button>
   `;
-  $('#setup-district-select').addEventListener('change', () => {
-    $('#setup-llg-select').innerHTML = llgOptionsHTML($('#setup-district-select').value, '');
-  });
-  const submit = () => {
-    const district = $('#setup-district-select').value;
-    const llg = $('#setup-llg-select').value;
-    if (!district || !llg) { showLockError("Select this device's District and LLG."); return; }
-    handleSetup($('#pin-setup-1').value, $('#pin-setup-2').value, legacyRecords, district, llg);
-  };
-  $('#btn-pin-setup').addEventListener('click', submit);
-  $('#pin-setup-2').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  const submit = () => handleLogin($('#login-email').value.trim(), $('#login-password').value);
+  $('#btn-login').addEventListener('click', submit);
+  $('#login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  setTimeout(() => { const el = $('#login-email'); if (el) el.focus(); }, 50);
 }
 
-function renderUnlockForm() {
-  const c = $('#lock-content');
-  c.innerHTML = `
-    <h3>Enter PIN</h3>
-    <p class="lock-desc">This device's survey data is encrypted.</p>
-    <input type="password" inputmode="numeric" pattern="[0-9]*" id="pin-unlock" placeholder="PIN" maxlength="8">
-    <div class="lock-error" id="lock-error"></div>
-    <button class="btn btn-primary btn-full" id="btn-pin-unlock">Unlock</button>
-    <button type="button" class="lock-forgot" id="btn-forgot-pin">Forgot PIN? Erase this device's data</button>
-  `;
-  const submit = () => handleUnlock($('#pin-unlock').value);
-  $('#btn-pin-unlock').addEventListener('click', submit);
-  $('#pin-unlock').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  $('#btn-forgot-pin').addEventListener('click', handleForgotPin);
-  setTimeout(() => { const el = $('#pin-unlock'); if (el) el.focus(); }, 50);
-  const state = getPinFailState();
-  const remaining = state.lockUntil - Date.now();
-  if (remaining > 0) showLockError(`Too many incorrect attempts. Try again in ${Math.ceil(remaining / 1000)}s.`);
+async function handleLogin(email, password) {
+  if (!email || !password) { showLoginError('Enter your email and password.'); return; }
+  showLoginError('');
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { showLoginError(error.message || 'Sign in failed.'); return; }
+  await finishLogin();
 }
 
-async function handleSetup(pin, confirmPin, legacyRecords, district, llg) {
-  if (!/^\d{4,8}$/.test(pin)) { showLockError('PIN must be 4–8 digits.'); return; }
-  if (pin !== confirmPin) { showLockError('PINs do not match.'); return; }
-  showLockError('');
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const saltB64 = bytesToBase64(salt);
-  localStorage.setItem(VAULT_META_KEY, JSON.stringify({ salt: saltB64, iterations: PBKDF2_ITERATIONS, createdAt: new Date().toISOString() }));
-  cryptoKey = await deriveKey(pin, saltB64, PBKDF2_ITERATIONS);
-  recordsCache = legacyRecords || [];
-  await persistAllRecordsBulk(recordsCache);
-  if (legacyRecords && legacyRecords.length) localStorage.removeItem(STORAGE_KEY); // old single-blob storage no longer used
-  setAssignedLLG(district, llg);
-  finishUnlock();
+const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 30 minutes
+let inactivityTimer = null;
+async function signOutForInactivity() {
+  await sb.auth.signOut().catch(() => {});
+  recordsCache = [];
+  draft = null;
+  stopAutosaveInterval();
+  $('#lock-screen').hidden = false;
+  document.body.classList.add('locked');
+  renderLoginForm();
+  toast('Signed out after 30 minutes of inactivity');
 }
-
-const PIN_FAIL_KEY = 'enb_msme_pin_fails_v1';
-const PIN_FAIL_THRESHOLD = 5;
-const PIN_LOCKOUT_MS = 30000;
-function getPinFailState() {
-  try { return JSON.parse(localStorage.getItem(PIN_FAIL_KEY)) || { count: 0, lockUntil: 0 }; }
-  catch (e) { return { count: 0, lockUntil: 0 }; }
+function resetInactivityTimer() {
+  if (document.body.classList.contains('locked')) return; // not signed in - nothing to time out
+  clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(signOutForInactivity, INACTIVITY_LIMIT_MS);
 }
-function setPinFailState(state) { localStorage.setItem(PIN_FAIL_KEY, JSON.stringify(state)); }
-function clearPinFailState() { localStorage.removeItem(PIN_FAIL_KEY); }
+['click', 'keydown', 'touchstart', 'scroll'].forEach(evt => document.addEventListener(evt, resetInactivityTimer, { passive: true }));
 
-async function handleUnlock(pin) {
-  const state = getPinFailState();
-  const now = Date.now();
-  if (state.lockUntil > now) {
-    showLockError(`Too many incorrect attempts. Try again in ${Math.ceil((state.lockUntil - now) / 1000)}s.`);
-    return;
-  }
-  if (!pin) { showLockError('Enter your PIN.'); return; }
-  let meta;
-  try { meta = JSON.parse(localStorage.getItem(VAULT_META_KEY)); } catch (e) { meta = null; }
-  if (!meta) { showLockError('Vault info missing on this device.'); return; }
-  showLockError('');
-  cryptoKey = await deriveKey(pin, meta.salt, meta.iterations);
-  const ok = await attemptUnlockWithKey();
-  if (ok) {
-    clearPinFailState();
-  } else {
-    const newCount = (state.count || 0) + 1;
-    if (newCount >= PIN_FAIL_THRESHOLD) {
-      setPinFailState({ count: 0, lockUntil: Date.now() + PIN_LOCKOUT_MS });
-      showLockError(`Too many incorrect attempts. Try again in ${Math.ceil(PIN_LOCKOUT_MS / 1000)}s.`);
-    } else {
-      setPinFailState({ count: newCount, lockUntil: 0 });
-      showLockError(`Incorrect PIN. ${PIN_FAIL_THRESHOLD - newCount} attempt(s) left before a short lockout.`);
-    }
-  }
-}
-
-async function attemptUnlockWithKey() {
-  try {
-    const idbRecords = await loadAllRecordsFromIDB();
-    if (idbRecords.length > 0) {
-      recordsCache = idbRecords;
-    } else {
-      // No IndexedDB data yet — check for the old single-blob localStorage
-      // scheme from a previous version of this app, and migrate it in once.
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const legacy = await decryptJSON(cryptoKey, JSON.parse(raw));
-        recordsCache = Array.isArray(legacy) ? legacy : [];
-        if (recordsCache.length) {
-          await persistAllRecordsBulk(recordsCache);
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      } else {
-        recordsCache = [];
-      }
-    }
-  } catch (e) {
-    cryptoKey = null;
-    return false;
-  }
-  if (!getAssignedLLG()) {
-    renderConfirmLLGScreen(); // existing device, upgrading — one-time prompt before reaching the dashboard
-  } else {
-    finishUnlock();
-  }
-  return true;
-}
-
-// One-time migration screen for devices that already had a PIN (and possibly
-// data) before device-level LLG locking existed. Suggests an LLG based on
-// this device's own existing records where possible, but always requires
-// an explicit confirm tap — never silently assumes.
-function renderConfirmLLGScreen() {
-  const inferred = inferLLGFromRecords(recordsCache);
-  const c = $('#lock-content');
-  c.innerHTML = `
-    <h3>Confirm this device's LLG</h3>
-    <p class="lock-desc">One-time step. From now on, every new survey on this device automatically uses this LLG — no more picking it per survey.</p>
-    ${inferred ? `<div class="lock-warn">Based on this device's existing records, this looks like <strong>${esc(inferred.llg)}</strong> — confirm or change it below.</div>` : ''}
-    <div class="field" style="text-align:left; margin-bottom:10px;">
-      <label style="display:block; font-size:12.5px; font-weight:600; margin-bottom:5px;">District</label>
-      <select id="confirm-district-select" style="width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface);">
-        <option value="">Select district…</option>
-        ${DISTRICTS.map(d => `<option value="${d}" ${inferred && inferred.district === d ? 'selected' : ''}>${d}</option>`).join('')}
-      </select>
-    </div>
-    <div class="field" style="text-align:left; margin-bottom:14px;">
-      <label style="display:block; font-size:12.5px; font-weight:600; margin-bottom:5px;">LLG</label>
-      <select id="confirm-llg-select" style="width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface);">
-        ${llgOptionsHTML(inferred ? inferred.district : '', inferred ? inferred.llg : '')}
-      </select>
-    </div>
-    <div class="lock-error" id="lock-error"></div>
-    <button class="btn btn-primary btn-full" id="btn-confirm-llg">Confirm &amp; Continue</button>
-  `;
-  $('#confirm-district-select').addEventListener('change', () => {
-    $('#confirm-llg-select').innerHTML = llgOptionsHTML($('#confirm-district-select').value, '');
-  });
-  $('#btn-confirm-llg').addEventListener('click', () => {
-    const district = $('#confirm-district-select').value;
-    const llg = $('#confirm-llg-select').value;
-    if (!district || !llg) { showLockError("Select this device's District and LLG."); return; }
-    setAssignedLLG(district, llg);
-    finishUnlock();
-  });
-}
-
-function finishUnlock() {
+async function finishLogin() {
+  recordsCache = []; // no longer preloaded in full - Dashboard, Records, and Summary each fetch what they need
   $('#lock-screen').hidden = true;
   document.body.classList.remove('locked');
-  const assigned = getAssignedLLG();
-  const llgLabel = $('#brand-llg-label');
-  if (llgLabel) llgLabel.textContent = assigned ? assigned.llg : 'Commerce & Industry';
+  resetInactivityTimer();
   renderDashboard();
 }
 
-function handleForgotPin() {
-  if (!confirm("This erases this device's PIN and ALL survey data stored on it — it can't be decrypted without the PIN anyway. This cannot be undone. Continue?")) return;
-  if (!confirm('Are you absolutely sure? All local records on this device will be permanently lost.')) return;
-  localStorage.removeItem(VAULT_META_KEY);
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(DRAFT_KEY);
-  clearPinFailState();
-  cryptoKey = null;
-  recordsCache = [];
-  idbClear().catch(() => {}).finally(() => initLockScreen());
-}
-
-function lockDevice() {
-  cryptoKey = null;
-  recordsCache = [];
-  draft = null;
+async function initLockScreen() {
   $('#lock-screen').hidden = false;
   document.body.classList.add('locked');
-  renderUnlockForm();
-}
-
-async function changePin() {
-  let meta;
-  try { meta = JSON.parse(localStorage.getItem(VAULT_META_KEY)); } catch (e) { meta = null; }
-  if (!meta) { toast('No PIN set on this device yet'); return; }
-  const currentPin = prompt('Enter your current PIN:');
-  if (currentPin == null) return;
-  try {
-    const testKey = await deriveKey(currentPin, meta.salt, meta.iterations);
-    const entries = await idbGetAll();
-    if (entries.length > 0) await decryptJSON(testKey, entries[0].envelope); // verify against one real entry, if any exist
-  } catch (e) { toast('Current PIN is incorrect'); return; }
-  const newPin = prompt('Enter a new PIN (4–8 digits):');
-  if (newPin == null) return;
-  if (!/^\d{4,8}$/.test(newPin)) { toast('PIN must be 4–8 digits'); return; }
-  const confirmNew = prompt('Confirm new PIN:');
-  if (confirmNew !== newPin) { toast('PINs did not match — PIN not changed'); return; }
-  const newSalt = crypto.getRandomValues(new Uint8Array(16));
-  const newSaltB64 = bytesToBase64(newSalt);
-  cryptoKey = await deriveKey(newPin, newSaltB64, PBKDF2_ITERATIONS);
-  localStorage.setItem(VAULT_META_KEY, JSON.stringify({ salt: newSaltB64, iterations: PBKDF2_ITERATIONS, createdAt: meta.createdAt, changedAt: new Date().toISOString() }));
-  await persistAllRecordsBulk(recordsCache);
-  toast('PIN changed');
-}
-
-async function changeLLGAssignment() {
-  let meta;
-  try { meta = JSON.parse(localStorage.getItem(VAULT_META_KEY)); } catch (e) { meta = null; }
-  if (!meta) { toast('No PIN set on this device yet'); return; }
-  const currentPin = prompt("Enter your PIN to change this device's LLG assignment:");
-  if (currentPin == null) return;
-  try {
-    const testKey = await deriveKey(currentPin, meta.salt, meta.iterations);
-    const entries = await idbGetAll();
-    if (entries.length > 0) await decryptJSON(testKey, entries[0].envelope);
-  } catch (e) { toast('PIN is incorrect'); return; }
-
-  const current = getAssignedLLG();
-  $('#lock-screen').hidden = false;
-  document.body.classList.add('locked');
-  const c = $('#lock-content');
-  c.innerHTML = `
-    <h3>Change LLG Assignment</h3>
-    <p class="lock-desc">This only affects NEW surveys from now on — existing records keep their original LLG.</p>
-    <div class="field" style="text-align:left; margin-bottom:10px;">
-      <label style="display:block; font-size:12.5px; font-weight:600; margin-bottom:5px;">District</label>
-      <select id="change-district-select" style="width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface);">
-        <option value="">Select district…</option>
-        ${DISTRICTS.map(d => `<option value="${d}" ${current && current.district === d ? 'selected' : ''}>${d}</option>`).join('')}
-      </select>
-    </div>
-    <div class="field" style="text-align:left; margin-bottom:14px;">
-      <label style="display:block; font-size:12.5px; font-weight:600; margin-bottom:5px;">LLG</label>
-      <select id="change-llg-select" style="width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface);">
-        ${llgOptionsHTML(current ? current.district : '', current ? current.llg : '')}
-      </select>
-    </div>
-    <div class="lock-error" id="lock-error"></div>
-    <button class="btn btn-primary btn-full" id="btn-save-llg-change">Save</button>
-    <button type="button" class="lock-forgot" id="btn-cancel-llg-change">Cancel</button>
-  `;
-  $('#change-district-select').addEventListener('change', () => {
-    $('#change-llg-select').innerHTML = llgOptionsHTML($('#change-district-select').value, '');
-  });
-  $('#btn-save-llg-change').addEventListener('click', () => {
-    const district = $('#change-district-select').value;
-    const llg = $('#change-llg-select').value;
-    if (!district || !llg) { showLockError('Select a District and LLG.'); return; }
-    setAssignedLLG(district, llg);
-    $('#lock-screen').hidden = true;
-    document.body.classList.remove('locked');
-    const llgLabel = $('#brand-llg-label');
-    if (llgLabel) llgLabel.textContent = llg;
-    toast('LLG assignment updated');
-    renderTransfer();
-  });
-  $('#btn-cancel-llg-change').addEventListener('click', () => {
-    $('#lock-screen').hidden = true;
-    document.body.classList.remove('locked');
-  });
-}
-
-function initLockScreen() {
-  $('#lock-screen').hidden = false;
-  document.body.classList.add('locked');
-  const vaultMetaRaw = localStorage.getItem(VAULT_META_KEY);
-  let legacyRecords = null;
-  if (!vaultMetaRaw) {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (Array.isArray(parsed)) legacyRecords = parsed;
-    } catch (e) {}
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    await finishLogin();
+  } else {
+    renderLoginForm();
   }
-  if (vaultMetaRaw) renderUnlockForm();
-  else renderSetupForm(legacyRecords ? legacyRecords.length : 0, legacyRecords);
 }
 
 /* -------------------------------- boot -------------------------------- */
@@ -1968,30 +1543,17 @@ if (APP_ROLE === 'enumerator') {
   const importSection = document.getElementById('import-section');
   if (importSection) importSection.remove();
 }
-if ('serviceWorker' in navigator) {
-  setOfflineStatus(false);
-  if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-    setOfflineStatus(false, 'This page was opened directly from a file, not from the website — offline mode only works when loaded from the live HTTPS site at least once.');
-  } else {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').then((reg) => {
-        if (navigator.serviceWorker.controller) setOfflineStatus(true);
-        const track = (worker) => {
-          if (!worker) return;
-          worker.addEventListener('statechange', () => {
-            if (worker.state === 'activated') setOfflineStatus(true);
-          });
-        };
-        track(reg.installing || reg.waiting);
-        reg.addEventListener('updatefound', () => track(reg.installing));
-      }).catch((err) => {
-        console.error('Service worker registration failed:', err);
-        setOfflineStatus(false, 'Could not set up offline mode on this browser. Try reloading once while connected.');
-      });
-      navigator.serviceWorker.addEventListener('controllerchange', () => setOfflineStatus(true));
-    });
-  }
-} else {
-  setOfflineStatus(false, 'This browser does not support offline mode. Try Chrome or the built-in browser on your phone.');
+
+// Service worker still caches the static shell for fast loading and PWA
+// install — it just no longer implies the app works without a connection.
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((err) => console.error('Service worker registration failed:', err));
+  });
 }
+
+setConnectionStatus(navigator.onLine);
+window.addEventListener('online', () => setConnectionStatus(true));
+window.addEventListener('offline', () => setConnectionStatus(false));
+
 initLockScreen();
