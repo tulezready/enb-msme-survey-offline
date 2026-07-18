@@ -151,6 +151,7 @@ async function checkDuplicateRemote(rec) {
       .eq('district', rec.location.district)
       .eq('llg', rec.location.llg)
       .eq('household_no', rec.location.householdNo)
+      .is('deleted_at', null)
       .neq('id', rec.id || '');
     if (rec.location.ward) query = query.eq('ward', rec.location.ward);
     const { data, error } = await query.limit(1);
@@ -177,11 +178,18 @@ function recordToRow(r) {
   };
 }
 async function deleteRecordRemote(id) {
-  const { error } = await sb.from('msme_records').delete().eq('id', id);
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from('msme_records')
+    .update({ deleted_at: new Date().toISOString(), deleted_by: user ? user.id : null })
+    .eq('id', id);
+  if (error) throw error;
+}
+async function restoreRecordRemote(id) {
+  const { error } = await sb.from('msme_records').update({ deleted_at: null, deleted_by: null }).eq('id', id);
   if (error) throw error;
 }
 async function fetchAllRecords() {
-  const { data, error } = await sb.from('msme_records').select('data').order('updated_at', { ascending: false });
+  const { data, error } = await sb.from('msme_records').select('data').is('deleted_at', null).order('updated_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(row => row.data);
 }
@@ -434,7 +442,7 @@ async function renderRecordsList() {
   container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
 
   try {
-    let query = sb.from('msme_records').select('data', { count: 'exact' }).order('updated_at', { ascending: false });
+    let query = sb.from('msme_records').select('data', { count: 'exact' }).is('deleted_at', null).order('updated_at', { ascending: false });
     if (activeChip !== 'All') query = query.eq('district', activeChip);
     if (q) {
       const term = `%${q}%`;
@@ -757,10 +765,10 @@ async function openDetail(id) {
   $('#btn-detail-edit').onclick = () => editRecord(r.id);
   $('#btn-detail-back').onclick = () => switchView('records');
   $('#btn-detail-delete').onclick = () => {
-    if (confirm('Delete this record from the database? This cannot be undone and affects everyone using HQ.')) {
+    if (confirm('Remove this record from view for everyone using HQ? It can be restored later from Transfer → Deleted Records.')) {
       recordsCache = recordsCache.filter(x => x.id !== r.id);
       deleteRecordRemote(r.id).catch(err => { console.error(err); toast('Could not delete — check your connection'); });
-      toast('Record deleted');
+      toast('Record deleted — recoverable from Deleted Records');
       switchView('records');
     }
   };
@@ -1297,18 +1305,62 @@ async function saveDraftRecord() {
 /* -------------------------------- transfer -------------------------------- */
 async function renderTransfer() {
   $('#transfer-record-count').textContent = '…';
+  $('#deleted-record-count').textContent = '…';
   try {
-    const { count, error } = await sb.from('msme_records').select('id', { count: 'exact', head: true });
+    const { count, error } = await sb.from('msme_records').select('id', { count: 'exact', head: true }).is('deleted_at', null);
     if (error) throw error;
     $('#transfer-record-count').textContent = count;
   } catch (e) {
     console.error('Failed to load record count:', e);
     $('#transfer-record-count').textContent = '—';
   }
+  try {
+    const { count, error } = await sb.from('msme_records').select('id', { count: 'exact', head: true }).not('deleted_at', 'is', null);
+    if (error) throw error;
+    $('#deleted-record-count').textContent = count;
+  } catch (e) {
+    console.error('Failed to load deleted record count:', e);
+    $('#deleted-record-count').textContent = '—';
+  }
   const { data: { user } } = await sb.auth.getUser();
   const emailEl = $('#account-email');
   if (emailEl) emailEl.textContent = user ? user.email : '—';
 }
+async function loadDeletedRecords() {
+  const container = $('#deleted-records-list');
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  try {
+    const { data, error } = await sb.from('msme_records').select('data, deleted_at').not('deleted_at', 'is', null).order('deleted_at', { ascending: false });
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      container.innerHTML = `<p class="hint">Nothing deleted.</p>`;
+      return;
+    }
+    container.innerHTML = data.map(row => `
+      <div class="record-item" data-id="${row.data.id}">
+        <div class="info"><strong>${esc(recordDisplayName(row.data))}</strong><span>Deleted ${fmtDate(row.deleted_at)}</span></div>
+        <button class="btn btn-outline btn-sm" data-restore-id="${row.data.id}">Restore</button>
+      </div>
+    `).join('');
+    $all('[data-restore-id]', container).forEach(btn => btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = 'Restoring…';
+      try {
+        await restoreRecordRemote(btn.dataset.restoreId);
+        toast('Record restored');
+        renderTransfer();
+        loadDeletedRecords();
+      } catch (e) {
+        console.error('Restore failed:', e);
+        toast('Could not restore — check your connection');
+        btn.disabled = false; btn.textContent = 'Restore';
+      }
+    }));
+  } catch (e) {
+    console.error('Failed to load deleted records:', e);
+    container.innerHTML = `<p class="hint">Could not load — check your connection.</p>`;
+  }
+}
+$('#btn-view-deleted').addEventListener('click', loadDeletedRecords);
 $('#btn-sign-out').addEventListener('click', async () => {
   clearTimeout(inactivityTimer);
   await sb.auth.signOut();
