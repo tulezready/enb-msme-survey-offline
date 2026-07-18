@@ -540,7 +540,14 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <div class="section-title">Database</div>
   <div class="card">
     <div class="review-line"><span class="k">Records in database</span><span class="v" id="transfer-record-count">0</span></div>
-    <p class="hint" style="margin-top:8px;">This is the shared provincial database — deleting a record here removes it for everyone. Use a record's own Delete button if you need to remove one.</p>
+    <p class="hint" style="margin-top:8px;">This is the shared provincial database — deleting a record here removes it from view for everyone, but it can be restored below.</p>
+  </div>
+
+  <div class="section-title">Deleted Records</div>
+  <div class="card">
+    <div class="review-line"><span class="k">Deleted records</span><span class="v" id="deleted-record-count">0</span></div>
+    <button class="btn btn-outline btn-full" style="margin-top:10px;" id="btn-view-deleted">View &amp; Restore</button>
+    <div id="deleted-records-list" style="margin-top:10px;"></div>
   </div>
 </div>
 
