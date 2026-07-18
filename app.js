@@ -1,12 +1,25 @@
 /* =========================================================================
-   ENB Commerce & Industry — Economic & MSME Survey (Offline)
-   All data lives in localStorage on this device. No network calls, ever.
+   ENBPA — Division of Commerce & Industry — Economic & MSME Survey (PHQ App)
+   Connected to the shared Supabase database. Requires an internet connection.
    ========================================================================= */
 
 const STORAGE_KEY = 'enb_msme_draft_cache_v1'; // local draft-only cache now, not the source of truth
 const DRAFT_KEY = 'enb_msme_draft_v1';
 const APP_ROLE = (document.body && document.body.dataset.role) || 'hq'; // 'hq' | 'enumerator'
 const DISTRICTS = ['Gazelle', 'Kokopo', 'Pomio', 'Rabaul'];
+// One distinct color per district, used purely for quick visual scanning
+// (dots/badges) — chosen to be distinguishable from each other and from the
+// existing green/amber business-status colors used elsewhere in the app.
+const DISTRICT_COLORS = {
+  'Gazelle': '#2E6F8E',
+  'Kokopo': '#C77B26',
+  'Pomio': '#6B4C9A',
+  'Rabaul': '#B0413E'
+};
+function districtDotHTML(district) {
+  const color = DISTRICT_COLORS[district] || '#9C948A';
+  return `<span class="district-dot" style="background:${color}"></span>`;
+}
 const LLG_BY_DISTRICT = {
   'Gazelle': ['Central Gazelle Rural', 'Inland Baining Rural', 'Lassul Baining Rural', 'Open Bay Rural', 'Livuan Rural', 'Reimber Rural', 'Toma Rural', 'Vunadidir Rural'],
   'Kokopo': ['Bitapaka Rural', 'Duke of York Rural', 'Kokopo-Vunamami Urban', 'Raluana Rural'],
@@ -362,7 +375,7 @@ async function renderDashboard() {
   $('#stat-informal').textContent = stats.informal;
 
   dEl.innerHTML = DISTRICTS.map(d => `
-    <div class="review-line"><span class="k">${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
+    <div class="review-line"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
   `).join('');
 
   const recent = stats.recent || [];
@@ -394,7 +407,7 @@ function recordItemHTML(r) {
   const statusLabel = status === 'formal' ? 'Formal' : status === 'informal' ? 'Informal' : 'No business';
   return `<div class="record-item" data-id="${r.id}">
     <div class="badge ${status}">${esc(initials)}</div>
-    <div class="info"><strong>${esc(title)}</strong><span>${esc(sub)} · ${fmtDate(r.location.dateCollected)}</span></div>
+    <div class="info"><strong>${districtDotHTML(r.location.district)}${esc(title)}</strong><span>${esc(sub)} · ${fmtDate(r.location.dateCollected)}</span></div>
     <div class="status-tag ${status}">${statusLabel}</div>
   </div>`;
 }
@@ -405,7 +418,7 @@ async function renderRecordsList() {
   const chipsEl = $('#district-chips');
   const activeChip = renderRecordsList._chip || 'All';
   chipsEl.innerHTML = ['All', ...DISTRICTS].map(d =>
-    `<button class="chip ${d === activeChip ? 'active' : ''}" data-d="${esc(d)}">${esc(d)}</button>`
+    `<button class="chip ${d !== 'All' ? 'district-' + d : ''} ${d === activeChip ? 'active' : ''}" data-d="${esc(d)}">${d !== 'All' ? districtDotHTML(d) : ''}${esc(d)}</button>`
   ).join('');
   $all('.chip', chipsEl).forEach(c => c.addEventListener('click', () => {
     renderRecordsList._chip = c.dataset.d;
@@ -523,7 +536,7 @@ function stackedBarBlockHTML(title, rowsData) {
     const iPct = total ? Math.round(d.informal / total * 100) : 0;
     const nPct = total ? Math.max(0, 100 - fPct - iPct) : 0;
     return `<div class="chart-row">
-      <div class="chart-label">${esc(d.label)}</div>
+      <div class="chart-label">${districtDotHTML(d.label)}${esc(d.label)}</div>
       <div class="chart-track stacked-track">
         <div class="stacked-seg formal" style="width:${fPct}%"></div>
         <div class="stacked-seg informal" style="width:${iPct}%"></div>
@@ -630,7 +643,8 @@ async function renderRecordsSummary() {
   const printHeader = `<div class="print-header"><div class="ph-row">
     <div class="ph-seal"><img src="logo.svg" alt="ENB logo"></div>
     <div>
-      <div class="ph-title">ENB Commerce &amp; Industry — MSME Survey Report</div>
+      <div class="ph-title">ENBPA &middot; Division of Commerce &amp; Industry — Economic &amp; MSME Survey Report</div>
+      <div class="ph-sub-label" style="font-size:10px; color:var(--text-muted); letter-spacing:.04em; text-transform:uppercase;">Provincial HQ (PHQ)</div>
       <div class="ph-sub">Generated ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })} · ${total} record(s)</div>
     </div>
   </div></div>`;
@@ -689,7 +703,8 @@ async function openDetail(id) {
 
   let sections = '';
   sections += reviewBlockHTML('A. Location', [
-    ['District', r.location.district], ['LLG', r.location.llg], ['Village', r.location.village], ['Ward', r.location.ward],
+    ['District', r.location.district ? districtDotHTML(r.location.district) + esc(r.location.district) : '—', { raw: true }],
+    ['LLG', r.location.llg], ['Village', r.location.village], ['Ward', r.location.ward],
     ['Household No.', r.location.householdNo], ['Date collected', fmtDate(r.location.dateCollected)],
     ['Contact person', r.location.contactPerson], ['Mobile', r.location.mobile], ['Postal address', r.location.postalAddress]
   ]);
@@ -754,7 +769,11 @@ async function openDetail(id) {
 }
 function reviewBlockHTML(title, pairs, extraHtml) {
   return `<div class="review-block card"><h4>${esc(title)}</h4>${
-    pairs.map(([k, v]) => `<div class="review-line"><span class="k">${esc(k)}</span><span class="v">${esc(v === '' || v == null ? '—' : v)}</span></div>`).join('')
+    pairs.map(([k, v, opts]) => {
+      const raw = opts && opts.raw;
+      const displayV = (v === '' || v == null) ? '—' : v;
+      return `<div class="review-line"><span class="k">${esc(k)}</span><span class="v">${raw ? displayV : esc(displayV)}</span></div>`;
+    }).join('')
   }${extraHtml || ''}</div>`;
 }
 // Renders a labeled list of full entries (names + detail) under a review block —
@@ -1305,7 +1324,7 @@ $('#btn-export-json').addEventListener('click', async () => {
   try {
     const all = await fetchAllRecords();
     if (all.length === 0) { toast('No records to export yet'); return; }
-    const payload = { exportedAt: new Date().toISOString(), source: 'ENB MSME Survey (offline)', recordCount: all.length, records: all };
+    const payload = { exportedAt: new Date().toISOString(), source: 'ENBPA PHQ — Economic & MSME Survey', recordCount: all.length, records: all };
     downloadFile(`enb-msme-export-${todayStr()}.json`, JSON.stringify(payload, null, 2), 'application/json');
     toast('JSON exported — share this file with HQ');
   } catch (e) {
@@ -1480,7 +1499,7 @@ function renderLoginForm() {
   const c = $('#lock-content');
   c.innerHTML = `
     <h3>HQ Sign In</h3>
-    <p class="lock-desc">Sign in with your ENB Commerce &amp; Industry account.</p>
+    <p class="lock-desc">Sign in with your ENBPA Division of Commerce &amp; Industry account.</p>
     <input type="email" id="login-email" placeholder="Email" autocomplete="username" style="width:100%; text-align:center; font-size:16px; letter-spacing:normal; padding:12px; border:1.5px solid var(--border); border-radius:10px; margin-bottom:10px;">
     <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" style="width:100%; text-align:center; font-size:16px; letter-spacing:normal; padding:12px; border:1.5px solid var(--border); border-radius:10px; margin-bottom:10px;">
     <div class="lock-error" id="lock-error"></div>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ENB MSME Survey — Offline</title>
+<title>ENBPA PHQ — Economic & MSME Survey</title>
 <meta name="theme-color" content="#1B4B43">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -173,6 +173,13 @@ input,select,textarea{font-family:inherit; font-size:15px;}
 .status-tag.formal{background:var(--primary-light); color:var(--primary-dark);}
 .status-tag.informal{background:var(--accent-light); color:#8A4A05;}
 .status-tag.none{background:#EFECE6; color:#6B6259;}
+
+.district-dot{display:inline-block; width:8px; height:8px; border-radius:50%; flex-shrink:0; margin-right:6px; vertical-align:middle;}
+.chip.active .district-dot{display:none;}
+.chip.district-Gazelle.active{background:#2E6F8E; border-color:#2E6F8E;}
+.chip.district-Kokopo.active{background:#C77B26; border-color:#C77B26;}
+.chip.district-Pomio.active{background:#6B4C9A; border-color:#6B4C9A;}
+.chip.district-Rabaul.active{background:#B0413E; border-color:#B0413E;}
 
 .empty-state{text-align:center; padding:50px 20px; color:var(--text-muted);}
 .empty-state .icon{font-size:38px; margin-bottom:10px;}
@@ -439,10 +446,10 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 
 <div class="topbar">
   <div class="brand">
-    <div class="seal"><img src="logo.svg" alt="ENB Commerce & Industry logo"></div>
+    <div class="seal"><img src="logo.svg" alt="ENBPA Division of Commerce & Industry logo"></div>
     <div class="brand-text">
-      <div class="t1">Commerce &amp; Industry</div>
-      <div class="t2">MSME Survey</div>
+      <div class="t1">ENBPA &middot; PHQ</div>
+      <div class="t2">Economic &amp; MSME Survey</div>
     </div>
   </div>
   <div class="offline-pill"><span class="dot" id="offline-dot"></span><span id="offline-status-text">Checking…</span> · <span id="record-count-pill">0</span></div>
