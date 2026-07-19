@@ -11,10 +11,10 @@ const DISTRICTS = ['Gazelle', 'Kokopo', 'Pomio', 'Rabaul'];
 // (dots/badges) — chosen to be distinguishable from each other and from the
 // existing green/amber business-status colors used elsewhere in the app.
 const DISTRICT_COLORS = {
-  'Gazelle': '#2E6F8E',
-  'Kokopo': '#C77B26',
-  'Pomio': '#6B4C9A',
-  'Rabaul': '#B0413E'
+  'Gazelle': '#3A87AC',
+  'Kokopo': '#D68A35',
+  'Pomio': '#8058B5',
+  'Rabaul': '#C74F45'
 };
 function districtDotHTML(district) {
   const color = DISTRICT_COLORS[district] || '#9C948A';
@@ -596,12 +596,12 @@ function trendChartHTML(title, buckets) {
   }));
   const points = coords.map(c => `${c.x},${c.y}`).join(' ');
   const areaPoints = `${pad},${h - pad} ${points} ${w - pad},${h - pad}`;
-  const dots = coords.map(c => `<circle cx="${c.x}" cy="${c.y}" r="3.5" fill="#153F38"></circle>`).join('');
-  const labels = buckets.map((b, i) => `<text x="${coords[i].x}" y="${h - 6}" font-size="10" fill="#6B6259" text-anchor="middle">${esc(b.label)}</text>`).join('');
+  const dots = coords.map(c => `<circle cx="${c.x}" cy="${c.y}" r="3.5" style="fill:var(--primary)"></circle>`).join('');
+  const labels = buckets.map((b, i) => `<text x="${coords[i].x}" y="${h - 6}" font-size="10" style="fill:var(--text-muted)" text-anchor="middle">${esc(b.label)}</text>`).join('');
   return `<div class="review-block card"><h4>${esc(title)}</h4>
     <svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto; display:block;">
-      <polygon points="${areaPoints}" fill="#15423820"></polygon>
-      <polyline points="${points}" fill="none" stroke="#153F38" stroke-width="2.5"></polyline>
+      <polygon points="${areaPoints}" style="fill:var(--primary-glow)"></polygon>
+      <polyline points="${points}" fill="none" style="stroke:var(--primary)" stroke-width="2.5"></polyline>
       ${dots}
       ${labels}
     </svg>
@@ -666,9 +666,9 @@ async function renderRecordsSummary() {
     <div class="stat-card"><div class="num">${byStatus.none}</div><div class="lbl">No business</div></div>
   </div>`;
   html += donutChartHTML('Business Status Split', [
-    { label: 'Formal', value: byStatus.formal, color: '#153F38' },
-    { label: 'Informal', value: byStatus.informal, color: '#D97706' },
-    { label: 'No business', value: byStatus.none, color: '#B9B2A6' }
+    { label: 'Formal', value: byStatus.formal, color: 'var(--primary)' },
+    { label: 'Informal', value: byStatus.informal, color: 'var(--accent)' },
+    { label: 'No business', value: byStatus.none, color: 'var(--chart-neutral)' }
   ]);
   html += trendChartHTML('Surveys Collected — Last 8 Weeks', s.weekly_trend || []);
   html += stackedBarBlockHTML('By District (composition)', DISTRICTS.map(d => ({ label: d, ...byDistrictStatus[d] })));
