@@ -475,11 +475,6 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     <div class="stat-card"><div class="num" id="stat-informal">0</div><div class="lbl">Informal sector</div></div>
   </div>
 
-  <button class="big-action" id="btn-new-survey">
-    <div class="icon">📋</div>
-    <div class="txt"><strong>Start new survey</strong><span>Household economic &amp; MSME form</span></div>
-  </button>
-
   <div class="section-title">By district</div>
   <div class="card" id="district-breakdown"></div>
 
@@ -495,6 +490,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <div id="records-list-mode">
     <div class="search-bar">
       <input type="text" id="search-input" placeholder="Search household, village, business name…">
+      <button class="btn btn-outline" id="btn-add-manual" title="Add a record manually — for entries with no paper form, e.g. taken over the phone" style="flex-shrink:0; padding:10px 14px;">+ Add</button>
     </div>
     <div class="filter-chips" id="district-chips"></div>
     <div id="records-list-container"></div>
@@ -568,7 +564,6 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 <div class="bottomnav">
   <button data-view="dashboard" class="active"><span class="ic">🏠</span>Home</button>
   <button data-view="records"><span class="ic">🗂️</span>Records</button>
-  <button data-view="wizard-new"><span class="ic">➕</span>New</button>
   <button data-view="transfer"><span class="ic">🔄</span>Transfer</button>
 </div>
 

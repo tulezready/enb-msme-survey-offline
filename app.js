@@ -213,6 +213,7 @@ function newRecord() {
     id: uid(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    source: 'hq_manual', // this wizard is the only way HQ ever creates a record - field data always arrives via Upload instead
     location: { district: '', llg: '', village: '', ward: '', householdNo: '', dateCollected: todayStr(), contactPerson: '', mobile: '', postalAddress: '' },
     employment: { numFormallyEmployed: '', employedMembers: [], unemployedMembers: [], comments: '' },
     businessStatus: '', // 'formal' | 'informal' | 'none'
@@ -291,7 +292,7 @@ function switchView(view) {
     $('#view-' + v).hidden = shouldHide;
   });
   $all('.bottomnav button').forEach(b => b.classList.remove('active'));
-  const map = { dashboard: 'dashboard', records: 'records', wizard: 'wizard-new', detail: 'records', transfer: 'transfer' };
+  const map = { dashboard: 'dashboard', records: 'records', detail: 'records', transfer: 'transfer' };
   const navBtn = $all('.bottomnav button').find(b => b.dataset.view === map[view]);
   if (navBtn) navBtn.classList.add('active');
   window.scrollTo(0, 0);
@@ -303,14 +304,13 @@ function switchView(view) {
 $all('.bottomnav button').forEach(btn => {
   btn.addEventListener('click', () => {
     const v = btn.dataset.view;
-    if (currentView === 'wizard' && v !== 'wizard-new') {
-      if (!confirm('Leave this survey? Your progress is autosaved — you can continue it later from "New survey."')) return;
+    if (currentView === 'wizard') {
+      if (!confirm('Leave this record? Your progress is autosaved — find it again from Records → "+ Add".')) return;
     }
-    if (v === 'wizard-new') { startNewSurvey(); return; }
     switchView(v);
   });
 });
-$('#btn-new-survey').addEventListener('click', startNewSurvey);
+$('#btn-add-manual').addEventListener('click', startNewSurvey);
 
 async function startNewSurvey() {
   const existingDraft = await readDraft();
@@ -388,7 +388,7 @@ async function renderDashboard() {
 
   const recent = stats.recent || [];
   if (recent.length === 0) {
-    rEl.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No surveys recorded yet.<br>Tap "Start new survey" to begin.</p></div>`;
+    rEl.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No records yet.<br>They'll appear here once enumerators upload from the field.</p></div>`;
   } else {
     rEl.innerHTML = recent.map(recordItemHTML).join('');
     $all('#recent-list .record-item').forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
@@ -751,6 +751,7 @@ async function openDetail(id) {
         <span style="font-size:12.5px; color:var(--text-muted);">${esc([r.location.village, r.business.name].filter(Boolean).join(' · '))} · Collected ${fmtDate(r.location.dateCollected)}</span>
       </div>
     </div>
+    ${r.source === 'hq_manual' ? `<div class="warn-box" style="font-size:12px;">✎ Entered manually via PHQ — not from a field paper form.</div>` : ''}
     <div class="card">
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary" id="btn-detail-edit" style="flex:1;">Edit</button>
