@@ -1,9 +1,12 @@
-const CACHE_NAME = 'msme-survey-hq-v24';
+const CACHE_NAME = 'msme-survey-hq-v26';
 const APP_SHELL = [
   './index.html',
   './app.js',
   './manifest.json',
-  './icon.svg',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-maskable-192.png',
+  './icon-maskable-512.png',
   './logo.svg'
 ];
 
