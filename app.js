@@ -110,8 +110,8 @@ const STEP_DEFS = {
 };
 
 function stepsForStatus(status) {
-  if (status === 'formal') return ['A', 'B', 'C', 'D', 'E', 'REVIEW'];
-  if (status === 'informal') return ['A', 'B', 'G8', 'G', 'REVIEW'];
+  if (status === 'formal') return ['A', 'B', 'F', 'C', 'D', 'E', 'REVIEW'];
+  if (status === 'informal') return ['A', 'B', 'F', 'G8', 'G', 'REVIEW'];
   return ['A', 'B', 'F', 'REVIEW'];
 }
 
@@ -1411,7 +1411,7 @@ function joinRows(arr, fmt) {
 
 function recordsToCSV(records) {
   const cols = [
-    'id','createdAt','updatedAt','district','llg','village','ward','householdNo','dateCollected','contactPerson','mobile','postalAddress',
+    'id','createdAt','updatedAt','source','district','llg','village','ward','householdNo','dateCollected','contactPerson','mobile','postalAddress',
     'numFormallyEmployed','employedMembersDetail','unemployedMembersDetail','businessStatus',
     'businessActivities','businessName','dateCommenced','businessOwner','ipaRegistered',
     'regFormsDetail','licensesDetail','loanAccess','loansDetail','loanReasons',
@@ -1443,7 +1443,7 @@ function recordsToCSV(records) {
       `${e.ownerName || 'Owner'} — ${e.activityType || 'activity'} (Est. ${e.yearEstablished || '—'}, K${e.monthlyTurnover || '—'}/mo)`);
 
     return [
-      r.id, r.createdAt, r.updatedAt, r.location.district, r.location.llg, r.location.village, r.location.ward, r.location.householdNo,
+      r.id, r.createdAt, r.updatedAt, r.source === 'hq_manual' ? 'hq_manual' : 'field', r.location.district, r.location.llg, r.location.village, r.location.ward, r.location.householdNo,
       r.location.dateCollected, r.location.contactPerson, r.location.mobile, r.location.postalAddress,
       r.employment.numFormallyEmployed, employedDetail, unemployedDetail, r.businessStatus,
       allActivities.join('; '), r.business.name, r.business.dateCommenced, r.business.owner, r.business.ipaRegistered,
