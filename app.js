@@ -430,8 +430,41 @@ async function renderRecordsList() {
   ).join('');
   $all('.chip', chipsEl).forEach(c => c.addEventListener('click', () => {
     renderRecordsList._chip = c.dataset.d;
+    renderRecordsList._llg = 'All';   // narrowing the district invalidates any deeper selection
+    renderRecordsList._ward = 'All';
     renderRecordsList();
   }));
+
+  const activeLLG = renderRecordsList._llg || 'All';
+  const activeWard = renderRecordsList._ward || 'All';
+  const filtersEl = $('#llg-ward-filters');
+  if (activeChip === 'All') {
+    filtersEl.innerHTML = '';
+  } else {
+    const llgList = LLG_BY_DISTRICT[activeChip] || [];
+    const wardList = activeLLG !== 'All' ? (WARDS_BY_LLG[activeLLG] || []) : [];
+    filtersEl.innerHTML = `
+      <select id="llg-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); font-size:13px;">
+        <option value="All">All LLGs in ${esc(activeChip)}</option>
+        ${llgList.map(l => `<option value="${esc(l)}" ${l === activeLLG ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+      </select>
+      ${activeLLG !== 'All' ? `
+      <select id="ward-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); font-size:13px;">
+        <option value="All">All Wards in ${esc(activeLLG)}</option>
+        ${wardList.map(w => `<option value="${esc(w)}" ${w === activeWard ? 'selected' : ''}>${esc(w)}</option>`).join('')}
+      </select>` : ''}
+    `;
+    $('#llg-filter-select').addEventListener('change', (e) => {
+      renderRecordsList._llg = e.target.value;
+      renderRecordsList._ward = 'All'; // narrowing the LLG invalidates any deeper ward selection
+      renderRecordsList();
+    });
+    const wardSel = document.getElementById('ward-filter-select');
+    if (wardSel) wardSel.addEventListener('change', (e) => {
+      renderRecordsList._ward = e.target.value;
+      renderRecordsList();
+    });
+  }
 
   if (renderRecordsList._resetPage !== false) renderRecordsList._page = 1;
   renderRecordsList._resetPage = true;
@@ -444,6 +477,8 @@ async function renderRecordsList() {
   try {
     let query = sb.from('msme_records').select('data', { count: 'exact' }).is('deleted_at', null).order('updated_at', { ascending: false });
     if (activeChip !== 'All') query = query.eq('district', activeChip);
+    if (activeChip !== 'All' && activeLLG !== 'All') query = query.eq('llg', activeLLG);
+    if (activeChip !== 'All' && activeLLG !== 'All' && activeWard !== 'All') query = query.eq('ward', activeWard);
     if (q) {
       const term = `%${q}%`;
       query = query.or(`village.ilike.${term},household_no.ilike.${term},contact_person.ilike.${term},business_name.ilike.${term},ward.ilike.${term},llg.ilike.${term}`);
