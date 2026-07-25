@@ -444,12 +444,12 @@ async function renderRecordsList() {
     const llgList = LLG_BY_DISTRICT[activeChip] || [];
     const wardList = activeLLG !== 'All' ? (WARDS_BY_LLG[activeLLG] || []) : [];
     filtersEl.innerHTML = `
-      <select id="llg-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); font-size:13px;">
+      <select id="llg-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:#FFFFFF; color:#1A1A1A; font-size:13px;">
         <option value="All">All LLGs in ${esc(activeChip)}</option>
         ${llgList.map(l => `<option value="${esc(l)}" ${l === activeLLG ? 'selected' : ''}>${esc(l)}</option>`).join('')}
       </select>
       ${activeLLG !== 'All' ? `
-      <select id="ward-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); font-size:13px;">
+      <select id="ward-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:#FFFFFF; color:#1A1A1A; font-size:13px;">
         <option value="All">All Wards in ${esc(activeLLG)}</option>
         ${wardList.map(w => `<option value="${esc(w)}" ${w === activeWard ? 'selected' : ''}>${esc(w)}</option>`).join('')}
       </select>` : ''}
