@@ -111,7 +111,7 @@ const STEP_DEFS = {
 
 function stepsForStatus(status) {
   if (status === 'formal') return ['A', 'B', 'C', 'D', 'E', 'F', 'REVIEW'];
-  if (status === 'informal') return ['A', 'B', 'G8', 'G', 'F', 'REVIEW'];
+  if (status === 'informal') return ['A', 'B', 'F', 'G8', 'G', 'REVIEW'];
   return ['A', 'B', 'F', 'REVIEW'];
 }
 
@@ -1365,21 +1365,35 @@ async function renderTransfer() {
   if (emailEl) emailEl.textContent = user ? user.email : '—';
 }
 async function loadDeletedRecords() {
+  if (loadDeletedRecords._resetPage !== false) loadDeletedRecords._page = 1;
+  loadDeletedRecords._resetPage = true;
+  const page = loadDeletedRecords._page || 1;
+
   const container = $('#deleted-records-list');
   container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
   try {
-    const { data, error } = await sb.from('msme_records').select('data, deleted_at').not('deleted_at', 'is', null).order('deleted_at', { ascending: false });
+    const { data, error, count } = await sb.from('msme_records').select('data, deleted_at', { count: 'exact' }).not('deleted_at', 'is', null).order('deleted_at', { ascending: false }).range(0, page * RECORDS_PAGE_SIZE - 1);
     if (error) throw error;
     if (!data || data.length === 0) {
       container.innerHTML = `<p class="hint">Nothing deleted.</p>`;
       return;
     }
-    container.innerHTML = data.map(row => `
+    let html = data.map(row => `
       <div class="record-item" data-id="${row.data.id}">
         <div class="info"><strong>${esc(recordDisplayName(row.data))}</strong><span>Deleted ${fmtDate(row.deleted_at)}</span></div>
         <button class="btn btn-outline btn-sm" data-restore-id="${row.data.id}">Restore</button>
       </div>
     `).join('');
+    if (count > data.length) {
+      html += `<button class="btn btn-outline btn-full" id="btn-load-more-deleted">Load more (${count - data.length} remaining)</button>`;
+    }
+    container.innerHTML = html;
+    const loadMoreBtn = $('#btn-load-more-deleted');
+    if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => {
+      loadDeletedRecords._page = page + 1;
+      loadDeletedRecords._resetPage = false;
+      loadDeletedRecords();
+    });
     $all('[data-restore-id]', container).forEach(btn => btn.addEventListener('click', async () => {
       btn.disabled = true; btn.textContent = 'Restoring…';
       try {
