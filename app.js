@@ -572,14 +572,15 @@ function donutChartHTML(title, segments) {
 
 // 100%-stacked composition bar per row (e.g. per district) — shows the mix
 // of formal/informal/none within each row rather than just a raw total.
-function stackedBarBlockHTML(title, rowsData) {
+function stackedBarBlockHTML(title, rowsData, colorKeyField) {
   const rows = rowsData.map(d => {
     const total = d.formal + d.informal + d.none;
     const fPct = total ? Math.round(d.formal / total * 100) : 0;
     const iPct = total ? Math.round(d.informal / total * 100) : 0;
     const nPct = total ? Math.max(0, 100 - fPct - iPct) : 0;
+    const colorKey = colorKeyField ? d[colorKeyField] : d.label;
     return `<div class="chart-row">
-      <div class="chart-label">${districtDotHTML(d.label)}${esc(d.label)}</div>
+      <div class="chart-label">${districtDotHTML(colorKey)}${esc(d.label)}</div>
       <div class="chart-track stacked-track">
         <div class="stacked-seg formal" style="width:${fPct}%"></div>
         <div class="stacked-seg informal" style="width:${iPct}%"></div>
@@ -707,6 +708,12 @@ async function renderRecordsSummary() {
   ]);
   html += trendChartHTML('Surveys Collected — Last 8 Weeks', s.weekly_trend || []);
   html += stackedBarBlockHTML('By District (composition)', DISTRICTS.map(d => ({ label: d, ...byDistrictStatus[d] })));
+  const byLLGRows = s.by_llg || [];
+  if (byLLGRows.length) {
+    html += stackedBarBlockHTML('By LLG (composition)', byLLGRows.map(row => ({
+      label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none
+    })), 'district');
+  }
   html += barBlockHTML('B. Employment', [
     ['Total formally employed (reported)', employment.total_formally_employed],
     ['Employed members listed (Table 1)', employment.employed_listed],
