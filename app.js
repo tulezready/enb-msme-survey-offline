@@ -583,15 +583,21 @@ function donutChartHTML(title, segments) {
 
 // 100%-stacked composition bar per row (e.g. per district) — shows the mix
 // of formal/informal/none within each row rather than just a raw total.
-function stackedBarBlockHTML(title, rowsData, colorKeyField) {
-  const rows = rowsData.map(d => {
+function stackedBarBlockHTML(title, rowsData, colorKeyField, groupByField) {
+  let rows = '';
+  let lastGroup = null;
+  rowsData.forEach(d => {
+    if (groupByField && d[groupByField] !== lastGroup) {
+      lastGroup = d[groupByField];
+      rows += `<div class="chart-group-header">${districtDotHTML(lastGroup)}${esc(lastGroup)}</div>`;
+    }
     const total = d.formal + d.informal + d.none;
     const fPct = total ? Math.round(d.formal / total * 100) : 0;
     const iPct = total ? Math.round(d.informal / total * 100) : 0;
     const nPct = total ? Math.max(0, 100 - fPct - iPct) : 0;
     const colorKey = colorKeyField ? d[colorKeyField] : d.label;
-    return `<div class="chart-row">
-      <div class="chart-label">${districtDotHTML(colorKey)}${esc(d.label)}</div>
+    rows += `<div class="chart-row${groupByField ? ' chart-row-grouped' : ''}">
+      <div class="chart-label">${groupByField ? '' : districtDotHTML(colorKey)}${esc(d.label)}</div>
       <div class="chart-track stacked-track">
         <div class="stacked-seg formal" style="width:${fPct}%"></div>
         <div class="stacked-seg informal" style="width:${iPct}%"></div>
@@ -599,11 +605,12 @@ function stackedBarBlockHTML(title, rowsData, colorKeyField) {
       </div>
       <div class="stacked-total-badge">${total}</div>
     </div>`;
-  }).join('');
+  });
   const legend = `<div class="stacked-legend">
     <span><i class="dot formal"></i>Formal</span>
     <span><i class="dot informal"></i>Informal</span>
     <span><i class="dot none"></i>No business</span>
+
   </div>`;
   return `<div class="review-block card"><h4>${esc(title)}</h4>${rows}${legend}</div>`;
 }
@@ -723,7 +730,7 @@ async function renderRecordsSummary() {
   if (byLLGRows.length) {
     html += stackedBarBlockHTML('By LLG (composition)', byLLGRows.map(row => ({
       label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none
-    })), 'district');
+    })), 'district', 'district');
   }
   html += barBlockHTML('B. Employment', [
     ['Total formally employed (reported)', employment.total_formally_employed],

@@ -301,6 +301,14 @@ input,select,textarea{font-family:inherit; font-size:15px;}
 /* ===== Charts (Summary view) ===== */
 .chart-row{display:flex; align-items:center; gap:10px; padding:6px 0;}
 .chart-label{width:42%; font-size:12.5px; color:var(--text); flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.chart-group-header{
+  display:flex; align-items:center; font-size:12px; font-weight:700; color:var(--text);
+  text-transform:uppercase; letter-spacing:.03em; margin-top:14px; padding-bottom:4px;
+  border-bottom:1px solid var(--border);
+}
+.chart-group-header:first-child{margin-top:2px;}
+.chart-row-grouped{padding-left:16px;}
+.chart-row-grouped .chart-label{width:calc(42% - 16px);}
 .chart-track{flex:1; background:var(--surface-2); border-radius:6px; height:16px; overflow:hidden; position:relative;}
 .chart-fill{height:100%; background:linear-gradient(90deg, var(--primary-mid), var(--primary)); border-radius:6px 0 0 6px; transition:width .4s ease;}
 .chart-fill.accent{background:linear-gradient(90deg, var(--accent), var(--accent-dark));}
