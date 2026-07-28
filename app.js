@@ -586,7 +586,7 @@ function stackedBarBlockHTML(title, rowsData, colorKeyField) {
         <div class="stacked-seg informal" style="width:${iPct}%"></div>
         <div class="stacked-seg none" style="width:${nPct}%"></div>
       </div>
-      <div class="chart-value">${total}</div>
+      <div class="stacked-total-badge">${total}</div>
     </div>`;
   }).join('');
   const legend = `<div class="stacked-legend">
