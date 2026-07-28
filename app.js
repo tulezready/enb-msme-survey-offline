@@ -583,7 +583,7 @@ function donutChartHTML(title, segments) {
 
 // 100%-stacked composition bar per row (e.g. per district) — shows the mix
 // of formal/informal/none within each row rather than just a raw total.
-function stackedBarBlockHTML(title, rowsData, colorKeyField, groupByField) {
+function stackedBarBlockHTML(title, rowsData, colorKeyField, groupByField, subtitle) {
   let rows = '';
   let lastGroup = null;
   rowsData.forEach(d => {
@@ -612,7 +612,8 @@ function stackedBarBlockHTML(title, rowsData, colorKeyField, groupByField) {
     <span><i class="dot none"></i>No business</span>
 
   </div>`;
-  return `<div class="review-block card"><h4>${esc(title)}</h4>${rows}${legend}</div>`;
+  const subtitleHTML = subtitle ? `<p style="font-size:12px; color:var(--text-muted); margin:-6px 0 12px;">${esc(subtitle)}</p>` : '';
+  return `<div class="review-block card"><h4>${esc(title)}</h4>${subtitleHTML}${rows}${legend}</div>`;
 }
 
 // Buckets records into the last N calendar weeks by date collected, so the
@@ -727,10 +728,11 @@ async function renderRecordsSummary() {
   html += trendChartHTML('Surveys Collected — Last 8 Weeks', s.weekly_trend || []);
   html += stackedBarBlockHTML('By District (composition)', DISTRICTS.map(d => ({ label: d, ...byDistrictStatus[d] })));
   const byLLGRows = s.by_llg || [];
+  const coverage = s.llg_coverage || { total_llgs: 23, reporting: 0 };
   if (byLLGRows.length) {
     html += stackedBarBlockHTML('By LLG (composition)', byLLGRows.map(row => ({
       label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none
-    })), 'district', 'district');
+    })), 'district', 'district', `${coverage.reporting} of ${coverage.total_llgs} LLGs reporting`);
   }
   html += barBlockHTML('B. Employment', [
     ['Total formally employed (reported)', employment.total_formally_employed],
@@ -738,6 +740,8 @@ async function renderRecordsSummary() {
     ['Unemployed qualified members listed (Table 2)', employment.unemployed_listed]
   ]);
   if (topActivities.length) html += barBlockHTML('C. Top Business Activities', topActivities);
+  const informalActivities = (s.informal_activities || []).map(a => [a.label, a.count]);
+  if (informalActivities.length) html += barBlockHTML('G. Informal Sector — Activity Types', informalActivities);
   html += barBlockHTML('C. IPA Registration & Loans', [
     ['IPA registered — Yes', ipaLoans.ipa_yes], ['IPA registered — No', ipaLoans.ipa_no],
     ['Loan access — Yes', ipaLoans.loan_yes], ['Loan access — No', ipaLoans.loan_no]

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'msme-survey-hq-v35';
+const CACHE_NAME = 'msme-survey-hq-v37';
 const APP_SHELL = [
   './index.html',
   './app.js',
@@ -12,10 +12,18 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
-      .catch((err) => console.error('SW install failed to cache app shell:', err))
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      // Each file is fetched with {cache:'reload'} to bypass the browser's own
+      // HTTP cache, not just the service worker's cache - otherwise a new
+      // service worker version can still get populated with stale content
+      // the browser already had cached from an earlier visit.
+      await Promise.all(APP_SHELL.map(async (url) => {
+        const response = await fetch(url, { cache: 'reload' });
+        await cache.put(url, response);
+      }));
+      await self.skipWaiting();
+    })().catch((err) => console.error('SW install failed to cache app shell:', err))
   );
 });
 
