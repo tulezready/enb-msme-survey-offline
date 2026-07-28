@@ -443,10 +443,21 @@ async function renderRecordsList() {
   } else {
     const llgList = LLG_BY_DISTRICT[activeChip] || [];
     const wardList = activeLLG !== 'All' ? (WARDS_BY_LLG[activeLLG] || []) : [];
+
+    let llgCounts = {};
+    try {
+      const { data: countData, error: countErr } = await sb.rpc('get_llg_counts', { p_district: activeChip });
+      if (countErr) throw countErr;
+      llgCounts = countData || {};
+    } catch (e) {
+      console.error('Failed to load LLG counts:', e);
+    }
+    const districtTotal = Object.values(llgCounts).reduce((a, b) => a + b, 0);
+
     filtersEl.innerHTML = `
       <select id="llg-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:#FFFFFF; color:#1A1A1A; font-size:13px;">
-        <option value="All">All LLGs in ${esc(activeChip)}</option>
-        ${llgList.map(l => `<option value="${esc(l)}" ${l === activeLLG ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+        <option value="All">All LLGs in ${esc(activeChip)} (${districtTotal})</option>
+        ${llgList.map(l => `<option value="${esc(l)}" ${l === activeLLG ? 'selected' : ''}>${esc(l)} (${llgCounts[l] || 0})</option>`).join('')}
       </select>
       ${activeLLG !== 'All' ? `
       <select id="ward-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:#FFFFFF; color:#1A1A1A; font-size:13px;">
