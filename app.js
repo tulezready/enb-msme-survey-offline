@@ -439,10 +439,22 @@ function drillInto(level, district, llg) {
 function renderBreadcrumb() {
   const el = $('#records-breadcrumb');
   if (!el) return;
+  if (recordsDrillLevel === 'districts') { el.innerHTML = ''; return; }
+
+  const backTarget = recordsDrillLevel === 'llgs' ? 'districts' : recordsDrillLevel === 'wards' ? 'llgs' : 'wards';
   const parts = [`<a data-nav="districts">Districts</a>`];
   if (recordsDrillDistrict) parts.push(`<span>›</span><a data-nav="llgs">${esc(recordsDrillDistrict)}</a>`);
   if (recordsDrillLLG) parts.push(`<span>›</span><a data-nav="wards">${esc(recordsDrillLLG)}</a>`);
-  el.innerHTML = recordsDrillLevel === 'districts' ? '' : `<div class="records-breadcrumb">${parts.join(' ')}</div>`;
+
+  el.innerHTML = `
+    <button class="btn btn-outline" id="btn-records-back" style="padding:7px 12px; font-size:12.5px; margin-bottom:8px;">‹ Back</button>
+    <div class="records-breadcrumb">${parts.join(' ')}</div>
+  `;
+  $('#btn-records-back').addEventListener('click', () => {
+    if (backTarget === 'districts') drillInto('districts', null, null);
+    else if (backTarget === 'llgs') drillInto('llgs', recordsDrillDistrict, null);
+    else if (backTarget === 'wards') drillInto('wards', recordsDrillDistrict, recordsDrillLLG);
+  });
   $all('a[data-nav]', el).forEach(a => a.addEventListener('click', () => {
     const nav = a.dataset.nav;
     if (nav === 'districts') drillInto('districts', null, null);
@@ -496,15 +508,12 @@ async function renderLLGLevel() {
   const container = $('#records-list-container');
   container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
   try {
-    const { data, error } = await sb.rpc('get_llg_overview', { p_district: recordsDrillDistrict });
+    const officialLLGs = LLG_BY_DISTRICT[recordsDrillDistrict] || [];
+    const { data, error } = await sb.rpc('get_llg_overview', { p_district: recordsDrillDistrict, p_official_llgs: officialLLGs });
     if (error) throw error;
     const rows = data || [];
-    if (rows.length === 0) {
-      container.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No LLGs with records in ${esc(recordsDrillDistrict)} yet.</p></div>`;
-    } else {
-      container.innerHTML = rows.map(r => drillRowHTML(r.llg, r.total, r.recent)).join('');
-      $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('wards', recordsDrillDistrict, el.dataset.value)));
-    }
+    container.innerHTML = rows.map(r => drillRowHTML(r.llg, r.total, r.recent)).join('');
+    $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('wards', recordsDrillDistrict, el.dataset.value)));
   } catch (e) {
     console.error('Failed to load LLG overview:', e);
     container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
@@ -519,18 +528,15 @@ async function renderWardLevel() {
   const container = $('#records-list-container');
   container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
   try {
-    const { data, error } = await sb.rpc('get_ward_overview', { p_llg: recordsDrillLLG });
+    const officialWards = WARDS_BY_LLG[recordsDrillLLG] || [];
+    const { data, error } = await sb.rpc('get_ward_overview', { p_llg: recordsDrillLLG, p_official_wards: officialWards });
     if (error) throw error;
     const rows = data || [];
-    if (rows.length === 0) {
-      container.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No wards with records in ${esc(recordsDrillLLG)} yet.</p></div>`;
-    } else {
-      container.innerHTML = rows.map(r => drillRowHTML(r.ward, r.total, r.recent)).join('');
-      $all('.drill-row', container).forEach(el => el.addEventListener('click', () => {
-        recordsDrillWard = el.dataset.value;
-        drillInto('records', recordsDrillDistrict, recordsDrillLLG);
-      }));
-    }
+    container.innerHTML = rows.map(r => drillRowHTML(r.ward, r.total, r.recent)).join('');
+    $all('.drill-row', container).forEach(el => el.addEventListener('click', () => {
+      recordsDrillWard = el.dataset.value;
+      drillInto('records', recordsDrillDistrict, recordsDrillLLG);
+    }));
   } catch (e) {
     console.error('Failed to load ward overview:', e);
     container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
