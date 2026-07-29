@@ -422,78 +422,181 @@ function recordItemHTML(r) {
 
 /* ------------------------------ records list ------------------------------ */
 const RECORDS_PAGE_SIZE = 50;
-async function renderRecordsList() {
-  const chipsEl = $('#district-chips');
-  const activeChip = renderRecordsList._chip || 'All';
-  chipsEl.innerHTML = ['All', ...DISTRICTS].map(d =>
-    `<button class="chip ${d !== 'All' ? 'district-' + d : ''} ${d === activeChip ? 'active' : ''}" data-d="${esc(d)}">${d !== 'All' ? districtDotHTML(d) : ''}${esc(d)}</button>`
-  ).join('');
-  $all('.chip', chipsEl).forEach(c => c.addEventListener('click', () => {
-    renderRecordsList._chip = c.dataset.d;
-    renderRecordsList._llg = 'All';   // narrowing the district invalidates any deeper selection
-    renderRecordsList._ward = 'All';
-    renderRecordsList();
+let recordsDrillLevel = 'districts'; // 'districts' | 'llgs' | 'wards' | 'records'
+let recordsDrillDistrict = null;
+let recordsDrillLLG = null;
+let recordsDrillWard = null;
+
+function drillInto(level, district, llg) {
+  recordsDrillLevel = level;
+  if (district !== undefined) recordsDrillDistrict = district;
+  if (llg !== undefined) recordsDrillLLG = llg;
+  renderRecordsList._page = 1;
+  renderRecordsList._resetPage = false;
+  renderRecordsList();
+}
+
+function renderBreadcrumb() {
+  const el = $('#records-breadcrumb');
+  if (!el) return;
+  const parts = [`<a data-nav="districts">Districts</a>`];
+  if (recordsDrillDistrict) parts.push(`<span>›</span><a data-nav="llgs">${esc(recordsDrillDistrict)}</a>`);
+  if (recordsDrillLLG) parts.push(`<span>›</span><a data-nav="wards">${esc(recordsDrillLLG)}</a>`);
+  el.innerHTML = recordsDrillLevel === 'districts' ? '' : `<div class="records-breadcrumb">${parts.join(' ')}</div>`;
+  $all('a[data-nav]', el).forEach(a => a.addEventListener('click', () => {
+    const nav = a.dataset.nav;
+    if (nav === 'districts') drillInto('districts', null, null);
+    else if (nav === 'llgs') drillInto('llgs', recordsDrillDistrict, null);
+    else if (nav === 'wards') drillInto('wards', recordsDrillDistrict, recordsDrillLLG);
   }));
+}
 
-  const activeLLG = renderRecordsList._llg || 'All';
-  const activeWard = renderRecordsList._ward || 'All';
-  const filtersEl = $('#llg-ward-filters');
-  if (activeChip === 'All') {
-    filtersEl.innerHTML = '';
-  } else {
-    const llgList = LLG_BY_DISTRICT[activeChip] || [];
-    const wardList = activeLLG !== 'All' ? (WARDS_BY_LLG[activeLLG] || []) : [];
+function drillRowHTML(label, total, recent, colorDot) {
+  return `<div class="record-item drill-row" data-value="${esc(label)}">
+    <div class="info"><strong>${colorDot || ''}${esc(label)}</strong>${recent ? '<div class="drill-recent"><span class="dot"></span>Recently uploaded</div>' : ''}</div>
+    <div class="stacked-total-badge">${total}</div>
+    <div class="chev">›</div>
+  </div>`;
+}
 
-    let llgCounts = {};
-    try {
-      const { data: countData, error: countErr } = await sb.rpc('get_llg_counts', { p_district: activeChip });
-      if (countErr) throw countErr;
-      llgCounts = countData || {};
-    } catch (e) {
-      console.error('Failed to load LLG counts:', e);
-    }
-    const districtTotal = Object.values(llgCounts).reduce((a, b) => a + b, 0);
+async function renderRecordsList() {
+  const q = ($('#search-input').value || '').trim();
+  $('#records-breadcrumb').innerHTML = '';
 
-    filtersEl.innerHTML = `
-      <select id="llg-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:#FFFFFF; color:#1A1A1A; font-size:13px;">
-        <option value="All">All LLGs in ${esc(activeChip)} (${districtTotal})</option>
-        ${llgList.map(l => `<option value="${esc(l)}" ${l === activeLLG ? 'selected' : ''}>${esc(l)} (${llgCounts[l] || 0})</option>`).join('')}
-      </select>
-      ${activeLLG !== 'All' ? `
-      <select id="ward-filter-select" style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:#FFFFFF; color:#1A1A1A; font-size:13px;">
-        <option value="All">All Wards in ${esc(activeLLG)}</option>
-        ${wardList.map(w => `<option value="${esc(w)}" ${w === activeWard ? 'selected' : ''}>${esc(w)}</option>`).join('')}
-      </select>` : ''}
-    `;
-    $('#llg-filter-select').addEventListener('change', (e) => {
-      renderRecordsList._llg = e.target.value;
-      renderRecordsList._ward = 'All'; // narrowing the LLG invalidates any deeper ward selection
-      renderRecordsList();
-    });
-    const wardSel = document.getElementById('ward-filter-select');
-    if (wardSel) wardSel.addEventListener('change', (e) => {
-      renderRecordsList._ward = e.target.value;
-      renderRecordsList();
-    });
+  if (q) {
+    await renderFlatSearch(q);
+    return;
   }
+  if (recordsDrillLevel === 'districts') return renderDistrictLevel();
+  if (recordsDrillLevel === 'llgs') return renderLLGLevel();
+  if (recordsDrillLevel === 'wards') return renderWardLevel();
+  return renderRecordsAtWard();
+}
 
+async function renderDistrictLevel() {
+  const container = $('#records-list-container');
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  try {
+    const { data, error } = await sb.rpc('get_district_overview');
+    if (error) throw error;
+    const rows = data || [];
+    container.innerHTML = rows.map(r => drillRowHTML(r.district, r.total, r.recent, districtDotHTML(r.district))).join('');
+    $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('llgs', el.dataset.value, null)));
+  } catch (e) {
+    console.error('Failed to load district overview:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-records');
+    if (retryBtn) retryBtn.addEventListener('click', renderRecordsList);
+  }
+}
+
+async function renderLLGLevel() {
+  renderBreadcrumb();
+  const container = $('#records-list-container');
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  try {
+    const { data, error } = await sb.rpc('get_llg_overview', { p_district: recordsDrillDistrict });
+    if (error) throw error;
+    const rows = data || [];
+    if (rows.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No LLGs with records in ${esc(recordsDrillDistrict)} yet.</p></div>`;
+    } else {
+      container.innerHTML = rows.map(r => drillRowHTML(r.llg, r.total, r.recent)).join('');
+      $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('wards', recordsDrillDistrict, el.dataset.value)));
+    }
+  } catch (e) {
+    console.error('Failed to load LLG overview:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-records');
+    if (retryBtn) retryBtn.addEventListener('click', renderRecordsList);
+  }
+}
+
+async function renderWardLevel() {
+  renderBreadcrumb();
+  const container = $('#records-list-container');
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  try {
+    const { data, error } = await sb.rpc('get_ward_overview', { p_llg: recordsDrillLLG });
+    if (error) throw error;
+    const rows = data || [];
+    if (rows.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No wards with records in ${esc(recordsDrillLLG)} yet.</p></div>`;
+    } else {
+      container.innerHTML = rows.map(r => drillRowHTML(r.ward, r.total, r.recent)).join('');
+      $all('.drill-row', container).forEach(el => el.addEventListener('click', () => {
+        recordsDrillWard = el.dataset.value;
+        drillInto('records', recordsDrillDistrict, recordsDrillLLG);
+      }));
+    }
+  } catch (e) {
+    console.error('Failed to load ward overview:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-records');
+    if (retryBtn) retryBtn.addEventListener('click', renderRecordsList);
+  }
+}
+
+async function renderRecordsAtWard() {
+  renderBreadcrumb();
   if (renderRecordsList._resetPage !== false) renderRecordsList._page = 1;
   renderRecordsList._resetPage = true;
   const page = renderRecordsList._page || 1;
-  const q = ($('#search-input').value || '').trim();
 
   const container = $('#records-list-container');
   container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
 
   try {
-    let query = sb.from('msme_records').select('data', { count: 'exact' }).is('deleted_at', null).order('updated_at', { ascending: false });
-    if (activeChip !== 'All') query = query.eq('district', activeChip);
-    if (activeChip !== 'All' && activeLLG !== 'All') query = query.eq('llg', activeLLG);
-    if (activeChip !== 'All' && activeLLG !== 'All' && activeWard !== 'All') query = query.eq('ward', activeWard);
-    if (q) {
-      const term = `%${q}%`;
-      query = query.or(`village.ilike.${term},household_no.ilike.${term},contact_person.ilike.${term},business_name.ilike.${term},ward.ilike.${term},llg.ilike.${term}`);
+    let query = sb.from('msme_records').select('data', { count: 'exact' }).is('deleted_at', null)
+      .eq('district', recordsDrillDistrict).eq('llg', recordsDrillLLG).eq('ward', recordsDrillWard)
+      .order('updated_at', { ascending: false });
+    query = query.range(0, page * RECORDS_PAGE_SIZE - 1);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    const list = (data || []).map(row => row.data);
+
+    if (list.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No records found.</p></div>`;
+    } else {
+      let html = list.map(recordItemHTML).join('');
+      if (list.length < count) {
+        html += `<button class="btn btn-outline btn-full" id="btn-load-more-records">Load more (${count - list.length} remaining)</button>`;
+      }
+      container.innerHTML = html;
+      $all('.record-item', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
+      const loadMoreBtn = $('#btn-load-more-records');
+      if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => {
+        renderRecordsList._page = page + 1;
+        renderRecordsList._resetPage = false;
+        renderRecordsList();
+      });
     }
+  } catch (e) {
+    console.error('Failed to load records:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load records — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-records');
+    if (retryBtn) retryBtn.addEventListener('click', () => { renderRecordsList._resetPage = false; renderRecordsList(); });
+  }
+}
+
+async function renderFlatSearch(q) {
+  if (renderRecordsList._resetPage !== false) renderRecordsList._page = 1;
+  renderRecordsList._resetPage = true;
+  const page = renderRecordsList._page || 1;
+
+  const container = $('#records-list-container');
+  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+
+  try {
+    const term = `%${q}%`;
+    let query = sb.from('msme_records').select('data', { count: 'exact' }).is('deleted_at', null)
+      .or(`village.ilike.${term},household_no.ilike.${term},contact_person.ilike.${term},business_name.ilike.${term},ward.ilike.${term},llg.ilike.${term}`)
+      .order('updated_at', { ascending: false });
     query = query.range(0, page * RECORDS_PAGE_SIZE - 1);
 
     const { data, error, count } = await query;
@@ -517,8 +620,8 @@ async function renderRecordsList() {
       });
     }
   } catch (e) {
-    console.error('Failed to load records:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load records — check your connection.</p>
+    console.error('Failed to load search results:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
     const retryBtn = $('#btn-retry-records');
     if (retryBtn) retryBtn.addEventListener('click', () => { renderRecordsList._resetPage = false; renderRecordsList(); });
@@ -543,6 +646,45 @@ $all('#records-mode-toggle .chip').forEach(btn => btn.addEventListener('click', 
 
 function tallyEntries(tallyObj) {
   return Object.entries(tallyObj).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+}
+
+function marketPricesCardHTML(marketPrices) {
+  const commodities = ['Cocoa', 'Coconut/Copra'];
+  const cards = commodities.map(c => {
+    const d = marketPrices[c];
+    if (!d) {
+      return `<div class="stat-card"><div class="num">—</div><div class="lbl">${esc(c)}<br><span style="font-weight:400; font-size:11px;">No observations yet</span></div></div>`;
+    }
+    return `<div class="stat-card">
+      <div class="num">K${d.avg_price}</div>
+      <div class="lbl">${esc(c)} — avg/kg (last 30 days)<br>
+        <span style="font-weight:400; font-size:11px;">${d.observation_count} observation(s) · latest K${d.latest_price} at ${esc(d.latest_location)}, ${fmtDate(d.latest_date)}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="review-block card">
+    <h4>Local Market Prices</h4>
+    <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Manually logged from actual market visits — averaged over the last 30 days per commodity.</p>
+    <div class="stat-grid" style="margin-bottom:10px;">${cards}</div>
+    <button class="btn btn-outline btn-full" id="btn-toggle-price-form">+ Log a Price Observation</button>
+    <div id="price-observation-form" hidden style="margin-top:12px;">
+      <div class="field"><label>Commodity</label>
+        <select id="price-commodity-select">
+          <option value="Cocoa">Cocoa</option>
+          <option value="Coconut/Copra">Coconut/Copra</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Price per kg (K)</label><input type="number" id="price-value-input" step="0.01" min="0.01" placeholder="e.g. 8.75"></div>
+        <div class="field"><label>Date</label><input type="date" id="price-date-input" value="${todayStr()}"></div>
+      </div>
+      <div class="field"><label>Market / Location</label><input type="text" id="price-location-input" placeholder="e.g. Kokopo Market"></div>
+      <div class="field"><label>Notes (optional)</label><textarea id="price-notes-input" placeholder="Buyer name, quality grade, anything worth noting"></textarea></div>
+      <div class="lock-error" id="price-form-error"></div>
+      <button class="btn btn-primary btn-full" id="btn-save-price-observation">Save Observation</button>
+    </div>
+  </div>`;
 }
 
 function barBlockHTML(title, pairs, opts = {}) {
@@ -681,6 +823,15 @@ async function renderRecordsSummary() {
     return;
   }
 
+  let marketPrices = {};
+  try {
+    const { data: mpData, error: mpError } = await sb.rpc('get_market_price_summary');
+    if (mpError) throw mpError;
+    marketPrices = mpData || {};
+  } catch (e) {
+    console.error('Failed to load market prices (non-fatal, rest of summary still shows):', e);
+  }
+
   const total = s.total || 0;
   if (total === 0) {
     container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No records yet.<br>The summary fills in once records are collected or imported.</p></div>`;
@@ -713,6 +864,8 @@ async function renderRecordsSummary() {
   </div></div>`;
 
   let html = printHeader + `<div class="warn-box">Summary of all ${total} record(s) in the shared database — computed live from the server, updates automatically.</div>`;
+
+  html += marketPricesCardHTML(marketPrices);
 
   html += `<div class="stat-grid">
     <div class="stat-card"><div class="num">${total}</div><div class="lbl">Total surveyed</div></div>
@@ -760,6 +913,45 @@ async function renderRecordsSummary() {
   container.innerHTML = html;
   const printBtn = $('#btn-print-summary');
   if (printBtn) printBtn.addEventListener('click', () => window.print());
+
+  const toggleBtn = $('#btn-toggle-price-form');
+  const formEl = $('#price-observation-form');
+  if (toggleBtn && formEl) {
+    toggleBtn.addEventListener('click', () => {
+      formEl.hidden = !formEl.hidden;
+      toggleBtn.textContent = formEl.hidden ? '+ Log a Price Observation' : 'Cancel';
+    });
+  }
+  const savePriceBtn = $('#btn-save-price-observation');
+  if (savePriceBtn) savePriceBtn.addEventListener('click', async () => {
+    const commodity = $('#price-commodity-select').value;
+    const price = parseFloat($('#price-value-input').value);
+    const date = $('#price-date-input').value;
+    const location = $('#price-location-input').value.trim();
+    const notes = $('#price-notes-input').value.trim();
+    const errEl = $('#price-form-error');
+    errEl.textContent = '';
+    if (!price || price <= 0) { errEl.textContent = 'Enter a valid price per kg.'; return; }
+    if (!location) { errEl.textContent = 'Enter the market or location.'; return; }
+    if (!date) { errEl.textContent = 'Select a date.'; return; }
+    savePriceBtn.disabled = true;
+    savePriceBtn.textContent = 'Saving…';
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      const { error } = await sb.from('market_prices').insert({
+        commodity, price_per_kg: price, recorded_date: date, market_location: location,
+        notes: notes || null, recorded_by: user ? user.id : null
+      });
+      if (error) throw error;
+      toast('Price observation saved');
+      renderRecordsSummary();
+    } catch (e) {
+      console.error('Failed to save price observation:', e);
+      errEl.textContent = 'Could not save — check your connection and try again.';
+      savePriceBtn.disabled = false;
+      savePriceBtn.textContent = 'Save Observation';
+    }
+  });
 }
 
 /* -------------------------------- detail view ------------------------------- */
