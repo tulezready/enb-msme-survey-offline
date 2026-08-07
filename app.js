@@ -270,6 +270,16 @@ function fmtDate(iso) {
   if (isNaN(d)) return iso;
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
+// Upload timestamps are worth showing to the minute - unlike a collection
+// date, the exact time a record arrived is genuinely useful when tracing
+// which batch it came in with.
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
+    ', ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
 
 /* ------------------------------ navigation ------------------------------- */
 let autosaveInterval = null;
@@ -336,9 +346,9 @@ async function startNewSurvey() {
 }
 
 async function fetchRecordById(id) {
-  const { data, error } = await sb.from('msme_records').select('data').eq('id', id).single();
+  const { data, error } = await sb.from('msme_records').select('data, created_at').eq('id', id).single();
   if (error) throw error;
-  return data.data;
+  return { ...data.data, _uploadedAt: data.created_at };
 }
 
 async function editRecord(id) {
@@ -413,9 +423,10 @@ function recordItemHTML(r) {
   const title = recordDisplayName(r);
   const sub = [r.location.village, r.business.name].filter(Boolean).join(' · ') || 'No further detail';
   const statusLabel = status === 'formal' ? 'Formal' : status === 'informal' ? 'Informal' : 'No business';
+  const uploadNote = r._uploadedAt ? ` · Uploaded ${fmtDate(r._uploadedAt)}` : '';
   return `<div class="record-item" data-id="${r.id}">
     <div class="badge ${status}">${esc(initials)}</div>
-    <div class="info"><strong>${districtDotHTML(r.location.district)}${esc(title)}</strong><span>${esc(sub)} · ${fmtDate(r.location.dateCollected)}</span></div>
+    <div class="info"><strong>${districtDotHTML(r.location.district)}${esc(title)}</strong><span>${esc(sub)} · Collected ${fmtDate(r.location.dateCollected)}${uploadNote}</span></div>
     <div class="status-tag ${status}">${statusLabel}</div>
   </div>`;
 }
@@ -556,14 +567,14 @@ async function renderRecordsAtWard() {
   container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
 
   try {
-    let query = sb.from('msme_records').select('data', { count: 'exact' }).is('deleted_at', null)
+    let query = sb.from('msme_records').select('data, created_at', { count: 'exact' }).is('deleted_at', null)
       .eq('district', recordsDrillDistrict).eq('llg', recordsDrillLLG).eq('ward', recordsDrillWard)
       .order('updated_at', { ascending: false });
     query = query.range(0, page * RECORDS_PAGE_SIZE - 1);
 
     const { data, error, count } = await query;
     if (error) throw error;
-    const list = (data || []).map(row => row.data);
+    const list = (data || []).map(row => ({ ...row.data, _uploadedAt: row.created_at }));
 
     if (list.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No records found.</p></div>`;
@@ -600,14 +611,14 @@ async function renderFlatSearch(q) {
 
   try {
     const term = `%${q}%`;
-    let query = sb.from('msme_records').select('data', { count: 'exact' }).is('deleted_at', null)
+    let query = sb.from('msme_records').select('data, created_at', { count: 'exact' }).is('deleted_at', null)
       .or(`village.ilike.${term},household_no.ilike.${term},contact_person.ilike.${term},business_name.ilike.${term},ward.ilike.${term},llg.ilike.${term}`)
       .order('updated_at', { ascending: false });
     query = query.range(0, page * RECORDS_PAGE_SIZE - 1);
 
     const { data, error, count } = await query;
     if (error) throw error;
-    const list = (data || []).map(row => row.data);
+    const list = (data || []).map(row => ({ ...row.data, _uploadedAt: row.created_at }));
 
     if (list.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching records.</p></div>`;
@@ -976,6 +987,7 @@ async function openDetail(id) {
     ['District', r.location.district ? districtDotHTML(r.location.district) + esc(r.location.district) : '—', { raw: true }],
     ['LLG', r.location.llg], ['Village', r.location.village], ['Ward', r.location.ward],
     ['Household No.', r.location.householdNo], ['Date collected', fmtDate(r.location.dateCollected)],
+    ['Uploaded to PHQ', r._uploadedAt ? fmtDateTime(r._uploadedAt) : '—'],
     ['Contact person', r.location.contactPerson], ['Mobile', r.location.mobile], ['Postal address', r.location.postalAddress]
   ]);
   sections += reviewBlockHTML('B. Employment', [
