@@ -177,6 +177,11 @@ input,select,textarea{font-family:inherit; font-size:15px;}
 .record-item .info{flex:1; min-width:0;}
 .record-item .info strong{display:block; font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .record-item .info span{font-size:12px; color:var(--text-muted); display:block;}
+.record-item .info .record-dates{
+  font-size:11.5px; color:var(--primary-dark); background:var(--primary-light);
+  display:inline-block; padding:3px 8px; border-radius:6px; margin-top:4px;
+}
+.record-item .info .record-dates strong{display:inline; font-size:inherit; color:inherit; overflow:visible; white-space:normal;}
 .record-item .status-tag{
   font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; font-weight:700;
   padding:3px 7px; border-radius:5px; flex-shrink:0;
@@ -511,6 +516,15 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     <div class="search-bar">
       <input type="text" id="search-input" placeholder="Search household, village, business name…">
       <button class="btn btn-outline" id="btn-add-manual" title="Add a record manually — for entries with no paper form, e.g. taken over the phone" style="flex-shrink:0; padding:10px 14px;">+ Add</button>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+      <label for="sort-select" style="font-size:12.5px; color:var(--text-muted); flex-shrink:0;">Sort:</label>
+      <select id="sort-select" style="flex:1; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); font-size:13px;">
+        <option value="uploaded_desc">Recently uploaded first</option>
+        <option value="uploaded_asc">Oldest uploads first</option>
+        <option value="collected_desc">Recently collected first</option>
+        <option value="collected_asc">Oldest collections first</option>
+      </select>
     </div>
     <div id="records-breadcrumb" style="margin-bottom:8px;"></div>
     <div id="records-list-container"></div>

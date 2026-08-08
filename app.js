@@ -423,10 +423,16 @@ function recordItemHTML(r) {
   const title = recordDisplayName(r);
   const sub = [r.location.village, r.business.name].filter(Boolean).join(' · ') || 'No further detail';
   const statusLabel = status === 'formal' ? 'Formal' : status === 'informal' ? 'Informal' : 'No business';
-  const uploadNote = r._uploadedAt ? ` · Uploaded ${fmtDate(r._uploadedAt)}` : '';
+  const uploadedLine = r._uploadedAt
+    ? `<strong>Uploaded:</strong> ${fmtDate(r._uploadedAt)}`
+    : `<strong>Uploaded:</strong> —`;
   return `<div class="record-item" data-id="${r.id}">
     <div class="badge ${status}">${esc(initials)}</div>
-    <div class="info"><strong>${districtDotHTML(r.location.district)}${esc(title)}</strong><span>${esc(sub)} · Collected ${fmtDate(r.location.dateCollected)}${uploadNote}</span></div>
+    <div class="info">
+      <strong>${districtDotHTML(r.location.district)}${esc(title)}</strong>
+      <span>${esc(sub)}</span>
+      <span class="record-dates"><strong>Collected:</strong> ${fmtDate(r.location.dateCollected)} &nbsp;&middot;&nbsp; ${uploadedLine}</span>
+    </div>
     <div class="status-tag ${status}">${statusLabel}</div>
   </div>`;
 }
@@ -557,6 +563,17 @@ async function renderWardLevel() {
   }
 }
 
+function getSortConfig() {
+  const sel = $('#sort-select');
+  const value = sel ? sel.value : 'uploaded_desc';
+  switch (value) {
+    case 'uploaded_asc': return { column: 'created_at', ascending: true };
+    case 'collected_desc': return { column: 'date_collected', ascending: false };
+    case 'collected_asc': return { column: 'date_collected', ascending: true };
+    case 'uploaded_desc': default: return { column: 'created_at', ascending: false };
+  }
+}
+
 async function renderRecordsAtWard() {
   renderBreadcrumb();
   if (renderRecordsList._resetPage !== false) renderRecordsList._page = 1;
@@ -567,9 +584,10 @@ async function renderRecordsAtWard() {
   container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
 
   try {
+    const sortConfig = getSortConfig();
     let query = sb.from('msme_records').select('data, created_at', { count: 'exact' }).is('deleted_at', null)
       .eq('district', recordsDrillDistrict).eq('llg', recordsDrillLLG).eq('ward', recordsDrillWard)
-      .order('updated_at', { ascending: false });
+      .order(sortConfig.column, { ascending: sortConfig.ascending });
     query = query.range(0, page * RECORDS_PAGE_SIZE - 1);
 
     const { data, error, count } = await query;
@@ -611,9 +629,10 @@ async function renderFlatSearch(q) {
 
   try {
     const term = `%${q}%`;
+    const sortConfig = getSortConfig();
     let query = sb.from('msme_records').select('data, created_at', { count: 'exact' }).is('deleted_at', null)
       .or(`village.ilike.${term},household_no.ilike.${term},contact_person.ilike.${term},business_name.ilike.${term},ward.ilike.${term},llg.ilike.${term}`)
-      .order('updated_at', { ascending: false });
+      .order(sortConfig.column, { ascending: sortConfig.ascending });
     query = query.range(0, page * RECORDS_PAGE_SIZE - 1);
 
     const { data, error, count } = await query;
@@ -648,6 +667,9 @@ let searchDebounceTimer = null;
 $('#search-input').addEventListener('input', () => {
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(renderRecordsList, 200);
+});
+$('#sort-select').addEventListener('change', () => {
+  renderRecordsList();
 });
 
 /* ------------------------------ records summary (all roles) ------------------------------ */
