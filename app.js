@@ -480,9 +480,13 @@ function renderBreadcrumb() {
   }));
 }
 
-function drillRowHTML(label, total, recent, colorDot) {
+function drillRowHTML(label, total, lastUploaded, colorDot) {
+  const isRecent = lastUploaded && (Date.now() - new Date(lastUploaded).getTime()) < 48 * 60 * 60 * 1000;
+  const dateLine = lastUploaded
+    ? `<div class="drill-recent${isRecent ? '' : ' drill-older'}"><span class="dot"></span>Last uploaded: ${fmtDate(lastUploaded)}</div>`
+    : `<div class="drill-recent drill-none">No uploads yet</div>`;
   return `<div class="record-item drill-row" data-value="${esc(label)}">
-    <div class="info"><strong>${colorDot || ''}${esc(label)}</strong>${recent ? '<div class="drill-recent"><span class="dot"></span>Recently uploaded</div>' : ''}</div>
+    <div class="info"><strong>${colorDot || ''}${esc(label)}</strong>${dateLine}</div>
     <div class="stacked-total-badge">${total}</div>
     <div class="chev">›</div>
   </div>`;
@@ -509,7 +513,7 @@ async function renderDistrictLevel() {
     const { data, error } = await sb.rpc('get_district_overview');
     if (error) throw error;
     const rows = data || [];
-    container.innerHTML = rows.map(r => drillRowHTML(r.district, r.total, r.recent, districtDotHTML(r.district))).join('');
+    container.innerHTML = rows.map(r => drillRowHTML(r.district, r.total, r.last_uploaded, districtDotHTML(r.district))).join('');
     $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('llgs', el.dataset.value, null)));
   } catch (e) {
     console.error('Failed to load district overview:', e);
@@ -529,7 +533,7 @@ async function renderLLGLevel() {
     const { data, error } = await sb.rpc('get_llg_overview', { p_district: recordsDrillDistrict, p_official_llgs: officialLLGs });
     if (error) throw error;
     const rows = data || [];
-    container.innerHTML = rows.map(r => drillRowHTML(r.llg, r.total, r.recent)).join('');
+    container.innerHTML = rows.map(r => drillRowHTML(r.llg, r.total, r.last_uploaded)).join('');
     $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('wards', recordsDrillDistrict, el.dataset.value)));
   } catch (e) {
     console.error('Failed to load LLG overview:', e);
@@ -549,7 +553,7 @@ async function renderWardLevel() {
     const { data, error } = await sb.rpc('get_ward_overview', { p_llg: recordsDrillLLG, p_official_wards: officialWards });
     if (error) throw error;
     const rows = data || [];
-    container.innerHTML = rows.map(r => drillRowHTML(r.ward, r.total, r.recent)).join('');
+    container.innerHTML = rows.map(r => drillRowHTML(r.ward, r.total, r.last_uploaded)).join('');
     $all('.drill-row', container).forEach(el => el.addEventListener('click', () => {
       recordsDrillWard = el.dataset.value;
       drillInto('records', recordsDrillDistrict, recordsDrillLLG);
