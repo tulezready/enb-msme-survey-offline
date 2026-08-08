@@ -250,6 +250,54 @@ let recordsCache = [];
 function $(sel, root) { return (root || document).querySelector(sel); }
 function $all(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
 function esc(s) { return (s === undefined || s === null) ? '' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+const PREFERS_REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Animates a number counting up to its final value - purely cosmetic, never
+// delays the real value from being correct; if the element gets removed or
+// re-rendered mid-animation, it simply stops (no error, no orphaned timer).
+function animateCountUp(el, target, duration = 700) {
+  if (!el) return;
+  const value = Number(target) || 0;
+  if (PREFERS_REDUCED_MOTION || value === 0) { el.textContent = value; return; }
+  const start = performance.now();
+  function tick(now) {
+    if (!document.body.contains(el)) return; // element was re-rendered away - stop quietly
+    const elapsed = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - elapsed, 3); // ease-out cubic
+    el.textContent = Math.round(eased * value);
+    if (elapsed < 1) requestAnimationFrame(tick);
+    else el.textContent = value;
+  }
+  requestAnimationFrame(tick);
+}
+
+function skeletonRows(count = 4) {
+  return Array.from({ length: count }).map(() => `
+    <div class="skeleton-row">
+      <div class="skeleton badge"></div>
+      <div class="skeleton-lines">
+        <div class="skeleton line-1"></div>
+        <div class="skeleton line-2"></div>
+      </div>
+    </div>
+  `).join('');
+}
+function skeletonStatGrid() {
+  return `<div class="skeleton-stat-grid">${'<div class="skeleton"></div>'.repeat(4)}</div>`;
+}
+function skeletonChart() {
+  return `<div class="skeleton skeleton-chart"></div>`;
+}
+// For content built as one large HTML string (like Summary) rather than
+// individual element updates - render the number as a data attribute with
+// "0" as the placeholder text, then call this once the HTML is in the DOM.
+function activateCountUps(root) {
+  $all('[data-countup]', root || document).forEach(el => {
+    const target = Number(el.dataset.countup) || 0;
+    animateCountUp(el, target);
+  });
+}
 function getPath(obj, path) { return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
 function setPath(obj, path, value) {
   const parts = path.split('.');
@@ -369,8 +417,8 @@ async function editRecord(id) {
 async function renderDashboard() {
   const dEl = $('#district-breakdown');
   const rEl = $('#recent-list');
-  dEl.innerHTML = `<div class="review-line"><span class="k">Loading…</span><span class="v"></span></div>`;
-  rEl.innerHTML = '';
+  dEl.innerHTML = skeletonRows(4);
+  rEl.innerHTML = skeletonRows(3);
 
   let stats;
   try {
@@ -387,10 +435,10 @@ async function renderDashboard() {
   }
 
   $('#record-count-pill').textContent = stats.total;
-  $('#stat-total').textContent = stats.total;
-  $('#stat-week').textContent = stats.this_week;
-  $('#stat-formal').textContent = stats.formal;
-  $('#stat-informal').textContent = stats.informal;
+  animateCountUp($('#stat-total'), stats.total);
+  animateCountUp($('#stat-week'), stats.this_week);
+  animateCountUp($('#stat-formal'), stats.formal);
+  animateCountUp($('#stat-informal'), stats.informal);
 
   dEl.innerHTML = DISTRICTS.map(d => `
     <div class="review-line"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
@@ -508,7 +556,7 @@ async function renderRecordsList() {
 
 async function renderDistrictLevel() {
   const container = $('#records-list-container');
-  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  container.innerHTML = skeletonRows(5);
   try {
     const { data, error } = await sb.rpc('get_district_overview');
     if (error) throw error;
@@ -527,7 +575,7 @@ async function renderDistrictLevel() {
 async function renderLLGLevel() {
   renderBreadcrumb();
   const container = $('#records-list-container');
-  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  container.innerHTML = skeletonRows(5);
   try {
     const officialLLGs = LLG_BY_DISTRICT[recordsDrillDistrict] || [];
     const { data, error } = await sb.rpc('get_llg_overview', { p_district: recordsDrillDistrict, p_official_llgs: officialLLGs });
@@ -547,7 +595,7 @@ async function renderLLGLevel() {
 async function renderWardLevel() {
   renderBreadcrumb();
   const container = $('#records-list-container');
-  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  container.innerHTML = skeletonRows(5);
   try {
     const officialWards = WARDS_BY_LLG[recordsDrillLLG] || [];
     const { data, error } = await sb.rpc('get_ward_overview', { p_llg: recordsDrillLLG, p_official_wards: officialWards });
@@ -585,7 +633,7 @@ async function renderRecordsAtWard() {
   const page = renderRecordsList._page || 1;
 
   const container = $('#records-list-container');
-  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  container.innerHTML = skeletonRows(5);
 
   try {
     const sortConfig = getSortConfig();
@@ -629,7 +677,7 @@ async function renderFlatSearch(q) {
   const page = renderRecordsList._page || 1;
 
   const container = $('#records-list-container');
-  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  container.innerHTML = skeletonRows(5);
 
   try {
     const term = `%${q}%`;
@@ -850,7 +898,7 @@ function trendChartHTML(title, buckets) {
 
 async function renderRecordsSummary() {
   const container = $('#records-summary-mode');
-  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading summary…</p></div>`;
+  container.innerHTML = skeletonStatGrid() + skeletonChart() + skeletonRows(3);
 
   let s;
   try {
@@ -911,10 +959,10 @@ async function renderRecordsSummary() {
   html += marketPricesCardHTML(marketPrices);
 
   html += `<div class="stat-grid">
-    <div class="stat-card"><div class="num">${total}</div><div class="lbl">Total surveyed</div></div>
-    <div class="stat-card accent"><div class="num">${byStatus.formal}</div><div class="lbl">Formal business</div></div>
-    <div class="stat-card"><div class="num">${byStatus.informal}</div><div class="lbl">Informal sector</div></div>
-    <div class="stat-card"><div class="num">${byStatus.none}</div><div class="lbl">No business</div></div>
+    <div class="stat-card"><div class="num" data-countup="${total}">0</div><div class="lbl">Total surveyed</div></div>
+    <div class="stat-card accent"><div class="num" data-countup="${byStatus.formal}">0</div><div class="lbl">Formal business</div></div>
+    <div class="stat-card"><div class="num" data-countup="${byStatus.informal}">0</div><div class="lbl">Informal sector</div></div>
+    <div class="stat-card"><div class="num" data-countup="${byStatus.none}">0</div><div class="lbl">No business</div></div>
   </div>`;
   html += donutChartHTML('Business Status Split', [
     { label: 'Formal', value: byStatus.formal, color: 'var(--primary)' },
@@ -954,6 +1002,7 @@ async function renderRecordsSummary() {
   html += `<button class="btn btn-outline btn-full" id="btn-print-summary">Print / Save as PDF</button>`;
 
   container.innerHTML = html;
+  activateCountUps(container);
   const printBtn = $('#btn-print-summary');
   if (printBtn) printBtn.addEventListener('click', () => window.print());
 
@@ -1635,7 +1684,7 @@ async function loadDeletedRecords() {
   const page = loadDeletedRecords._page || 1;
 
   const container = $('#deleted-records-list');
-  container.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div>`;
+  container.innerHTML = skeletonRows(5);
   try {
     const { data, error, count } = await sb.from('msme_records').select('data, deleted_at', { count: 'exact' }).not('deleted_at', 'is', null).order('deleted_at', { ascending: false }).range(0, page * RECORDS_PAGE_SIZE - 1);
     if (error) throw error;
