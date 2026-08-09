@@ -253,6 +253,46 @@ function esc(s) { return (s === undefined || s === null) ? '' : String(s).replac
 
 const PREFERS_REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+// Background photo slideshow - free, keyless image API, no external
+// dependency beyond a plain image URL. Two stacked layers crossfade;
+// the next photo is preloaded before it's ever shown, so a slow
+// connection never shows a half-loaded or blank frame mid-transition.
+const BG_SLIDESHOW_QUERIES = [
+  'volcano landscape', 'tropical rainforest', 'pacific ocean coastline',
+  'coconut palm plantation', 'cocoa plantation', 'coral reef',
+  'tropical island aerial', 'rainforest waterfall'
+];
+function startBackgroundSlideshow() {
+  const layerA = document.getElementById('bg-layer-a');
+  const layerB = document.getElementById('bg-layer-b');
+  if (!layerA || !layerB) return;
+  const bgUrl = (q) => `https://www.sourcesplash.com/i/random?q=${encodeURIComponent(q)}&w=1600&h=900`;
+
+  let showingA = true;
+  let queryIndex = Math.floor(Math.random() * BG_SLIDESHOW_QUERIES.length);
+  layerA.style.backgroundImage = `url("${bgUrl(BG_SLIDESHOW_QUERIES[queryIndex])}")`;
+  layerA.classList.add('show');
+
+  if (PREFERS_REDUCED_MOTION) return; // one photo, no rotation
+
+  function advance() {
+    queryIndex = (queryIndex + 1) % BG_SLIDESHOW_QUERIES.length;
+    const nextLayer = showingA ? layerB : layerA;
+    const currentLayer = showingA ? layerA : layerB;
+    const img = new Image();
+    img.onload = () => {
+      nextLayer.style.backgroundImage = `url("${img.src}")`;
+      nextLayer.classList.add('show');
+      currentLayer.classList.remove('show');
+      showingA = !showingA;
+    };
+    img.onerror = () => { /* one skipped photo - not worth surfacing to the user */ };
+    img.src = bgUrl(BG_SLIDESHOW_QUERIES[queryIndex]);
+  }
+  setInterval(advance, 28000);
+}
+startBackgroundSlideshow();
+
 // Animates a number counting up to its final value - purely cosmetic, never
 // delays the real value from being correct; if the element gets removed or
 // re-rendered mid-animation, it simply stops (no error, no orphaned timer).

@@ -39,6 +39,23 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 *{box-sizing:border-box;}
+
+/* ===== Background photo slideshow ===== */
+#bg-slideshow{
+  position:fixed; inset:0; z-index:-2; overflow:hidden; background:var(--bg);
+}
+#bg-slideshow .layer{
+  position:absolute; inset:0; background-size:cover; background-position:center;
+  opacity:0; transition:opacity 2.2s ease;
+}
+#bg-slideshow .layer.show{opacity:1;}
+#bg-slideshow::after{
+  content:''; position:fixed; inset:0; z-index:-1;
+  background:linear-gradient(180deg, rgba(14,22,19,0.82), rgba(14,22,19,0.90));
+}
+@media (prefers-reduced-motion: reduce){
+  #bg-slideshow .layer{transition:none;}
+}
 html,body{margin:0;padding:0;}
 body{
   background:var(--bg);
@@ -507,6 +524,11 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 </style>
 </head>
 <body data-role="hq">
+
+<div id="bg-slideshow">
+  <div class="layer" id="bg-layer-a"></div>
+  <div class="layer" id="bg-layer-b"></div>
+</div>
 
 <div id="lock-screen" class="lock-screen" hidden>
   <div class="lock-card">
