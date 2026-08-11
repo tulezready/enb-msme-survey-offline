@@ -615,6 +615,25 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     <button class="row-action" id="btn-export-csv"><div class="icon">📊</div><div class="txt"><strong>Export all as CSV</strong><span>Open in Excel / Google Sheets</span></div><div class="chev">›</div></button>
   </div>
 
+  <div class="section-title">Restore an LLG's Data</div>
+  <div class="card">
+    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">If an LLG loses the records on their device, export just their entries here — this file can be imported straight into the LLG App using "Combine Team Entries", restoring their data onto a new or repaired device.</p>
+    <div class="field-row">
+      <div class="field"><label>District</label>
+        <select id="restore-district-select">
+          <option value="">Select district…</option>
+        </select>
+      </div>
+      <div class="field"><label>LLG</label>
+        <select id="restore-llg-select" disabled>
+          <option value="">Select district first</option>
+        </select>
+      </div>
+    </div>
+    <div class="lock-error" id="restore-export-error"></div>
+    <button class="btn btn-primary btn-full" id="btn-export-llg-restore" disabled>Export This LLG's Data</button>
+  </div>
+
   <div id="import-section">
     <div class="section-title">Receive data / restore</div>
     <div class="card">

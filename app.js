@@ -194,6 +194,13 @@ async function fetchAllRecords() {
   return (data || []).map(row => row.data);
 }
 
+async function fetchRecordsForLLG(district, llg) {
+  const { data, error } = await sb.from('msme_records').select('data').is('deleted_at', null)
+    .eq('district', district).eq('llg', llg).order('updated_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(row => row.data);
+}
+
 function saveDraft(d) {
   try { d == null ? localStorage.removeItem(DRAFT_KEY) : localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); }
   catch (e) { console.error('Draft save failed:', e); }
@@ -780,7 +787,7 @@ function tallyEntries(tallyObj) {
 }
 
 function marketPricesCardHTML(marketPrices) {
-  const commodities = ['Cocoa', 'Coconut/Copra'];
+  const commodities = ['Cocoa', 'Coconut/Copra', 'Coffee'];
   const cards = commodities.map(c => {
     const d = marketPrices[c];
     if (!d) {
@@ -804,6 +811,7 @@ function marketPricesCardHTML(marketPrices) {
         <select id="price-commodity-select">
           <option value="Cocoa">Cocoa</option>
           <option value="Coconut/Copra">Coconut/Copra</option>
+          <option value="Coffee">Coffee</option>
         </select>
       </div>
       <div class="field-row">
@@ -814,6 +822,61 @@ function marketPricesCardHTML(marketPrices) {
       <div class="field"><label>Notes (optional)</label><textarea id="price-notes-input" placeholder="Buyer name, quality grade, anything worth noting"></textarea></div>
       <div class="lock-error" id="price-form-error"></div>
       <button class="btn btn-primary btn-full" id="btn-save-price-observation">Save Observation</button>
+    </div>
+  </div>`;
+}
+
+function priceComparisonCardHTML(priceComparison, marketPrices) {
+  const byCommodity = {};
+  (priceComparison || []).forEach(p => { byCommodity[p.commodity] = p; });
+  const commodities = ['Cocoa', 'Coconut/Copra', 'Coffee'];
+
+  const rows = commodities.map(c => {
+    const p = byCommodity[c] || {};
+    const hasBoth = p.local_price_pgk_kg != null && p.intl_price_pgk_kg != null;
+    const ratioColor = !hasBoth ? 'var(--text-muted)' : (p.ratio_pct >= 90 ? 'var(--primary)' : p.ratio_pct >= 60 ? 'var(--accent-dark)' : 'var(--danger)');
+    return `<div class="review-block" style="margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border);">
+      <h5 style="margin:0 0 8px; font-size:13.5px; font-weight:700; color:var(--primary-dark);">${esc(c)}</h5>
+      <div class="stat-grid" style="grid-template-columns:repeat(3,1fr); gap:8px;">
+        <div class="stat-card" style="padding:10px;"><div class="num" style="font-size:18px;">${p.local_price_pgk_kg != null ? 'K' + p.local_price_pgk_kg : '—'}</div><div class="lbl" style="font-size:10.5px;">Local /kg</div></div>
+        <div class="stat-card" style="padding:10px;"><div class="num" style="font-size:18px;">${p.intl_price_pgk_kg != null ? 'K' + p.intl_price_pgk_kg : '—'}</div><div class="lbl" style="font-size:10.5px;">International /kg (converted)</div></div>
+        <div class="stat-card" style="padding:10px; border-color:${ratioColor};"><div class="num" style="font-size:18px; color:${ratioColor};">${p.ratio_pct != null ? p.ratio_pct + '%' : '—'}</div><div class="lbl" style="font-size:10.5px;">Local as % of intl.</div></div>
+      </div>
+      ${p.intl_price_usd_tonne != null ? `<p style="font-size:11px; color:var(--text-muted); margin:8px 0 0;">International: $${p.intl_price_usd_tonne}/tonne${p.exchange_rate ? ` · converted at $1 = K${p.exchange_rate}${p.exchange_rate_date ? ' (' + fmtDate(p.exchange_rate_date) + ')' : ''}` : ' · no exchange rate on file yet'}</p>` : ''}
+    </div>`;
+  }).join('');
+
+  return `<div class="review-block card">
+    <h4>Local vs. International Prices</h4>
+    <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">International prices are entered manually for now — see the note below on connecting a live price feed. Converted to PGK per kg using the most recent exchange rate on file.</p>
+    ${rows}
+    <div style="display:flex; gap:8px; margin-top:4px;">
+      <button class="btn btn-outline" style="flex:1;" id="btn-toggle-intl-form">+ Log International Price</button>
+      <button class="btn btn-outline" style="flex:1;" id="btn-toggle-rate-form">Update Exchange Rate</button>
+    </div>
+    <div id="intl-price-form" hidden style="margin-top:12px;">
+      <div class="field"><label>Commodity</label>
+        <select id="intl-commodity-select">
+          <option value="Cocoa">Cocoa</option>
+          <option value="Coconut/Copra">Coconut/Copra</option>
+          <option value="Coffee">Coffee</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Price (USD per tonne)</label><input type="number" id="intl-value-input" step="0.01" min="0.01" placeholder="e.g. 8000"></div>
+        <div class="field"><label>Date</label><input type="date" id="intl-date-input" value="${todayStr()}"></div>
+      </div>
+      <div class="field"><label>Source (optional)</label><input type="text" id="intl-source-input" placeholder="e.g. ICE futures, trade press"></div>
+      <div class="lock-error" id="intl-form-error"></div>
+      <button class="btn btn-primary btn-full" id="btn-save-intl-price">Save International Price</button>
+    </div>
+    <div id="rate-form" hidden style="margin-top:12px;">
+      <div class="field-row">
+        <div class="field"><label>USD → PGK rate</label><input type="number" id="rate-value-input" step="0.0001" min="0.0001" placeholder="e.g. 3.75"></div>
+        <div class="field"><label>Date</label><input type="date" id="rate-date-input" value="${todayStr()}"></div>
+      </div>
+      <div class="lock-error" id="rate-form-error"></div>
+      <button class="btn btn-primary btn-full" id="btn-save-rate">Save Exchange Rate</button>
     </div>
   </div>`;
 }
@@ -963,6 +1026,15 @@ async function renderRecordsSummary() {
     console.error('Failed to load market prices (non-fatal, rest of summary still shows):', e);
   }
 
+  let priceComparison = [];
+  try {
+    const { data: pcData, error: pcError } = await sb.rpc('get_price_comparison');
+    if (pcError) throw pcError;
+    priceComparison = pcData || [];
+  } catch (e) {
+    console.error('Failed to load price comparison (non-fatal, rest of summary still shows):', e);
+  }
+
   const total = s.total || 0;
   if (total === 0) {
     container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No records yet.<br>The summary fills in once records are collected or imported.</p></div>`;
@@ -1038,6 +1110,7 @@ async function renderRecordsSummary() {
   html += barBlockHTML('E. Monthly Turnover Bracket', TURNOVER_BRACKETS.map(([c, label]) => [label, turnoverBracket[c] || 0]));
   html += barBlockHTML('E. Monthly Expenses Bracket', EXPENSE_BRACKETS.map(([c, label]) => [label, expensesBracket[c] || 0]));
   html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${(cashCrops[c] && cashCrops[c].trees) || 0} trees)`, (cashCrops[c] && cashCrops[c].blocks) || 0]));
+  html += priceComparisonCardHTML(priceComparison, marketPrices);
   html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalCount]]);
   html += `<button class="btn btn-outline btn-full" id="btn-print-summary">Print / Save as PDF</button>`;
 
@@ -1082,6 +1155,77 @@ async function renderRecordsSummary() {
       errEl.textContent = 'Could not save — check your connection and try again.';
       savePriceBtn.disabled = false;
       savePriceBtn.textContent = 'Save Observation';
+    }
+  });
+
+  const toggleIntlBtn = $('#btn-toggle-intl-form');
+  const intlFormEl = $('#intl-price-form');
+  if (toggleIntlBtn && intlFormEl) {
+    toggleIntlBtn.addEventListener('click', () => {
+      intlFormEl.hidden = !intlFormEl.hidden;
+      toggleIntlBtn.textContent = intlFormEl.hidden ? '+ Log International Price' : 'Cancel';
+    });
+  }
+  const saveIntlBtn = $('#btn-save-intl-price');
+  if (saveIntlBtn) saveIntlBtn.addEventListener('click', async () => {
+    const commodity = $('#intl-commodity-select').value;
+    const price = parseFloat($('#intl-value-input').value);
+    const date = $('#intl-date-input').value;
+    const source = $('#intl-source-input').value.trim();
+    const errEl = $('#intl-form-error');
+    errEl.textContent = '';
+    if (!price || price <= 0) { errEl.textContent = 'Enter a valid price per tonne.'; return; }
+    if (!date) { errEl.textContent = 'Select a date.'; return; }
+    saveIntlBtn.disabled = true;
+    saveIntlBtn.textContent = 'Saving…';
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      const { error } = await sb.from('international_market_prices').insert({
+        commodity, price_usd_per_tonne: price, recorded_date: date,
+        source: source || null, price_type: 'manual', entered_by: user ? user.id : null
+      });
+      if (error) throw error;
+      toast('International price saved');
+      renderRecordsSummary();
+    } catch (e) {
+      console.error('Failed to save international price:', e);
+      errEl.textContent = 'Could not save — check your connection and try again.';
+      saveIntlBtn.disabled = false;
+      saveIntlBtn.textContent = 'Save International Price';
+    }
+  });
+
+  const toggleRateBtn = $('#btn-toggle-rate-form');
+  const rateFormEl = $('#rate-form');
+  if (toggleRateBtn && rateFormEl) {
+    toggleRateBtn.addEventListener('click', () => {
+      rateFormEl.hidden = !rateFormEl.hidden;
+      toggleRateBtn.textContent = rateFormEl.hidden ? 'Update Exchange Rate' : 'Cancel';
+    });
+  }
+  const saveRateBtn = $('#btn-save-rate');
+  if (saveRateBtn) saveRateBtn.addEventListener('click', async () => {
+    const rate = parseFloat($('#rate-value-input').value);
+    const date = $('#rate-date-input').value;
+    const errEl = $('#rate-form-error');
+    errEl.textContent = '';
+    if (!rate || rate <= 0) { errEl.textContent = 'Enter a valid exchange rate.'; return; }
+    if (!date) { errEl.textContent = 'Select a date.'; return; }
+    saveRateBtn.disabled = true;
+    saveRateBtn.textContent = 'Saving…';
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      const { error } = await sb.from('exchange_rates').insert({
+        usd_to_pgk: rate, recorded_date: date, entered_by: user ? user.id : null
+      });
+      if (error) throw error;
+      toast('Exchange rate saved');
+      renderRecordsSummary();
+    } catch (e) {
+      console.error('Failed to save exchange rate:', e);
+      errEl.textContent = 'Could not save — check your connection and try again.';
+      saveRateBtn.disabled = false;
+      saveRateBtn.textContent = 'Save Exchange Rate';
     }
   });
 }
@@ -1805,6 +1949,73 @@ $('#btn-export-csv').addEventListener('click', async () => {
     toast('Could not export — check your connection');
   } finally {
     btn.disabled = false;
+  }
+});
+
+// --- Restore an LLG's data ---
+const restoreDistrictSelect = $('#restore-district-select');
+if (restoreDistrictSelect) {
+  restoreDistrictSelect.innerHTML = '<option value="">Select district…</option>' +
+    DISTRICTS.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  restoreDistrictSelect.addEventListener('change', () => {
+    const llgSelect = $('#restore-llg-select');
+    const exportBtn = $('#btn-export-llg-restore');
+    const district = restoreDistrictSelect.value;
+    const llgList = LLG_BY_DISTRICT[district] || [];
+    if (!district) {
+      llgSelect.innerHTML = '<option value="">Select district first</option>';
+      llgSelect.disabled = true;
+    } else {
+      llgSelect.innerHTML = '<option value="">Select LLG…</option>' + llgList.map(l => `<option value="${esc(l)}">${esc(l)}</option>`).join('');
+      llgSelect.disabled = false;
+    }
+    exportBtn.disabled = true;
+  });
+}
+const restoreLLGSelect = $('#restore-llg-select');
+if (restoreLLGSelect) {
+  restoreLLGSelect.addEventListener('change', () => {
+    $('#btn-export-llg-restore').disabled = !restoreLLGSelect.value;
+  });
+}
+$('#btn-export-llg-restore').addEventListener('click', async () => {
+  const district = $('#restore-district-select').value;
+  const llg = $('#restore-llg-select').value;
+  const errEl = $('#restore-export-error');
+  errEl.textContent = '';
+  if (!district || !llg) { errEl.textContent = 'Select a district and LLG first.'; return; }
+  const btn = $('#btn-export-llg-restore');
+  btn.disabled = true;
+  btn.textContent = 'Exporting…';
+  try {
+    const records = await fetchRecordsForLLG(district, llg);
+    if (records.length === 0) {
+      errEl.textContent = `No records found at HQ for ${llg}. There is nothing to restore.`;
+      return;
+    }
+    // These records are already at HQ by definition - that's where they
+    // just came from. Marking them synced means a restored device won't
+    // think it needs to re-upload data that's already safely stored.
+    const restoredAt = new Date().toISOString();
+    const recordsForRestore = records.map(r => ({ ...r, syncedAt: r.syncedAt || restoredAt }));
+    // Same shape the LLG App itself produces and reads via "Combine Team
+    // Entries" - this file can be imported directly on a new or repaired
+    // device with no conversion needed.
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      source: `ENBPA PHQ — Restore export for ${llg}`,
+      recordCount: recordsForRestore.length,
+      records: recordsForRestore
+    };
+    const llgPart = llg.replace(/\s+/g, '_');
+    downloadFile(`enb-msme-RESTORE-${llgPart}-${todayStr()}.json`, JSON.stringify(payload, null, 2), 'application/json');
+    toast(`${records.length} record(s) exported for ${llg}`);
+  } catch (e) {
+    console.error('LLG restore export failed:', e);
+    errEl.textContent = 'Could not export — check your connection and try again.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Export This LLG\u2019s Data';
   }
 });
 
