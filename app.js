@@ -1003,9 +1003,16 @@ async function renderRecordsSummary() {
   const container = $('#records-summary-mode');
   container.innerHTML = skeletonStatGrid() + skeletonChart() + skeletonRows(3);
 
+  const scopeDistrict = renderRecordsSummary._district || null;
+  const scopeLLG = renderRecordsSummary._llg || null;
+  const scopeWard = renderRecordsSummary._ward || null;
+  const scopeOfficialWards = scopeLLG ? (WARDS_BY_LLG[scopeLLG] || []) : null;
+
   let s;
   try {
-    const { data, error } = await sb.rpc('get_summary_stats', { weeks_back: 8 });
+    const { data, error } = await sb.rpc('get_summary_stats', {
+      weeks_back: 8, p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard, p_official_wards: scopeOfficialWards
+    });
     if (error) throw error;
     s = data;
   } catch (e) {
@@ -1066,7 +1073,35 @@ async function renderRecordsSummary() {
     </div>
   </div></div>`;
 
-  let html = printHeader + `<div class="warn-box">Summary of all ${total} record(s) in the shared database — computed live from the server, updates automatically.</div>`;
+  const scopeLabel = scopeWard ? `${scopeLLG} — ${scopeWard}` : scopeLLG ? scopeLLG : scopeDistrict ? scopeDistrict : 'the whole province';
+  const scopeLLGList = scopeDistrict ? (LLG_BY_DISTRICT[scopeDistrict] || []) : [];
+  const scopeWardList = scopeLLG ? (WARDS_BY_LLG[scopeLLG] || []) : [];
+
+  const scopeSelectorHTML = `<div class="review-block card">
+    <h4>View Summary For</h4>
+    <div class="field-row">
+      <div class="field"><label>District</label>
+        <select id="summary-scope-district">
+          <option value="">All Districts (province-wide)</option>
+          ${DISTRICTS.map(d => `<option value="${esc(d)}" ${d === scopeDistrict ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>LLG</label>
+        <select id="summary-scope-llg" ${scopeDistrict ? '' : 'disabled'}>
+          <option value="">All LLGs${scopeDistrict ? ' in ' + esc(scopeDistrict) : ''}</option>
+          ${scopeLLGList.map(l => `<option value="${esc(l)}" ${l === scopeLLG ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    ${scopeLLG ? `<div class="field"><label>Ward</label>
+      <select id="summary-scope-ward">
+        <option value="">All Wards in ${esc(scopeLLG)}</option>
+        ${scopeWardList.map(w => `<option value="${esc(w)}" ${w === scopeWard ? 'selected' : ''}>${esc(w)}</option>`).join('')}
+      </select>
+    </div>` : ''}
+  </div>`;
+
+  let html = printHeader + scopeSelectorHTML + `<div class="warn-box">Summary for ${esc(scopeLabel)} — ${total} record(s), computed live from the server, updates automatically.</div>`;
 
   html += marketPricesCardHTML(marketPrices);
 
@@ -1082,13 +1117,33 @@ async function renderRecordsSummary() {
     { label: 'No business', value: byStatus.none, color: 'var(--chart-neutral)' }
   ]);
   html += trendChartHTML('Surveys Collected — Last 8 Weeks', s.weekly_trend || []);
-  html += stackedBarBlockHTML('By District (composition)', DISTRICTS.map(d => ({ label: d, ...byDistrictStatus[d] })));
-  const byLLGRows = s.by_llg || [];
-  const coverage = s.llg_coverage || { total_llgs: 23, reporting: 0 };
-  if (byLLGRows.length) {
-    html += stackedBarBlockHTML('By LLG (composition)', byLLGRows.map(row => ({
-      label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none
-    })), 'district', 'district', `${coverage.reporting} of ${coverage.total_llgs} LLGs reporting`);
+
+  if (scopeWard) {
+    // Already at the finest level - the stat cards above already show this
+    // ward's own totals, so a composition chart here would just repeat them.
+  } else if (scopeLLG) {
+    const byWardRows = s.by_ward || [];
+    if (byWardRows.length) {
+      html += stackedBarBlockHTML('By Ward (composition)', byWardRows.map(row => ({
+        label: row.label, formal: row.formal, informal: row.informal, none: row.none
+      })));
+    }
+  } else if (scopeDistrict) {
+    const byLLGRows = s.by_llg || [];
+    if (byLLGRows.length) {
+      html += stackedBarBlockHTML('By LLG (composition)', byLLGRows.map(row => ({
+        label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none
+      })), 'district');
+    }
+  } else {
+    html += stackedBarBlockHTML('By District (composition)', DISTRICTS.map(d => ({ label: d, ...byDistrictStatus[d] })));
+    const byLLGRows = s.by_llg || [];
+    const coverage = s.llg_coverage || { total_llgs: 23, reporting: 0 };
+    if (byLLGRows.length) {
+      html += stackedBarBlockHTML('By LLG (composition)', byLLGRows.map(row => ({
+        label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none
+      })), 'district', 'district', `${coverage.reporting} of ${coverage.total_llgs} LLGs reporting`);
+    }
   }
   html += barBlockHTML('B. Employment', [
     ['Total formally employed (reported)', employment.total_formally_employed],
@@ -1118,6 +1173,25 @@ async function renderRecordsSummary() {
   activateCountUps(container);
   const printBtn = $('#btn-print-summary');
   if (printBtn) printBtn.addEventListener('click', () => window.print());
+
+  const scopeDistrictSelect = $('#summary-scope-district');
+  if (scopeDistrictSelect) scopeDistrictSelect.addEventListener('change', (e) => {
+    renderRecordsSummary._district = e.target.value || null;
+    renderRecordsSummary._llg = null; // narrowing the district invalidates any deeper selection
+    renderRecordsSummary._ward = null;
+    renderRecordsSummary();
+  });
+  const scopeLLGSelect = $('#summary-scope-llg');
+  if (scopeLLGSelect) scopeLLGSelect.addEventListener('change', (e) => {
+    renderRecordsSummary._llg = e.target.value || null;
+    renderRecordsSummary._ward = null; // narrowing the LLG invalidates any deeper ward selection
+    renderRecordsSummary();
+  });
+  const scopeWardSelect = $('#summary-scope-ward');
+  if (scopeWardSelect) scopeWardSelect.addEventListener('change', (e) => {
+    renderRecordsSummary._ward = e.target.value || null;
+    renderRecordsSummary();
+  });
 
   const toggleBtn = $('#btn-toggle-price-form');
   const formEl = $('#price-observation-form');
