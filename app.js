@@ -1194,6 +1194,17 @@ async function renderRecordsSummary() {
   if (assistanceList.length) html += barBlockHTML('Assistance Required (demand)', assistanceList, { accent: true });
   html += barBlockHTML('E. Monthly Turnover Bracket', TURNOVER_BRACKETS.map(([c, label]) => [label, turnoverBracket[c] || 0]));
   html += barBlockHTML('E. Monthly Expenses Bracket', EXPENSE_BRACKETS.map(([c, label]) => [label, expensesBracket[c] || 0]));
+  const econ = s.economic_amounts || {};
+  html += `<div class="review-block card">
+    <h4>E. Actual Amounts Reported (K)</h4>
+    <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">From the specific amount entered alongside each bracket selection — not every record includes one.</p>
+    <div class="stat-grid" style="grid-template-columns:repeat(2,1fr);">
+      <div class="stat-card"><div class="num">K${(econ.total_turnover || 0).toLocaleString()}</div><div class="lbl">Total turnover<br><span style="font-weight:400; font-size:10.5px;">${econ.turnover_count || 0} record(s) with an amount</span></div></div>
+      <div class="stat-card"><div class="num">${econ.avg_turnover != null ? 'K' + econ.avg_turnover.toLocaleString() : '—'}</div><div class="lbl">Average turnover</div></div>
+      <div class="stat-card"><div class="num">K${(econ.total_expenses || 0).toLocaleString()}</div><div class="lbl">Total expenses<br><span style="font-weight:400; font-size:10.5px;">${econ.expenses_count || 0} record(s) with an amount</span></div></div>
+      <div class="stat-card"><div class="num">${econ.avg_expenses != null ? 'K' + econ.avg_expenses.toLocaleString() : '—'}</div><div class="lbl">Average expenses</div></div>
+    </div>
+  </div>`;
   html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${(cashCrops[c] && cashCrops[c].trees) || 0} trees)`, (cashCrops[c] && cashCrops[c].blocks) || 0]));
   html += priceComparisonCardHTML(priceComparison, marketPrices, cashCrops);
   html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalCount]]);
