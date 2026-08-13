@@ -826,7 +826,16 @@ function marketPricesCardHTML(marketPrices) {
   </div>`;
 }
 
-function priceComparisonCardHTML(priceComparison, marketPrices) {
+// PNG-specific smallholder yield averages, dry/processed weight per tree per
+// year - cocoa as dry bean, coconut as copra, coffee as dry parchment
+// (matching whichever processed stage local prices are actually quoted
+// against, per discussion). These are provincial averages standing in for
+// ENB specifically, not measured ENB data - genuinely useful for spotting
+// relative potential between LLGs, not a precise per-farm prediction.
+const CROP_YIELD_PER_TREE_KG = { 'Cocoa': 0.38, 'Coconut': 7.7, 'Coffee': 0.43 };
+const CROP_TO_PRICE_COMMODITY = { 'Cocoa': 'Cocoa', 'Coconut': 'Coconut/Copra', 'Coffee': 'Coffee' };
+
+function priceComparisonCardHTML(priceComparison, marketPrices, cashCrops) {
   const byCommodity = {};
   (priceComparison || []).forEach(p => { byCommodity[p.commodity] = p; });
   const commodities = ['Cocoa', 'Coconut/Copra', 'Coffee'];
@@ -835,6 +844,26 @@ function priceComparisonCardHTML(priceComparison, marketPrices) {
     const p = byCommodity[c] || {};
     const hasBoth = p.local_price_pgk_kg != null && p.intl_price_pgk_kg != null;
     const ratioColor = !hasBoth ? 'var(--text-muted)' : (p.ratio_pct >= 90 ? 'var(--primary)' : p.ratio_pct >= 60 ? 'var(--accent-dark)' : 'var(--danger)');
+
+    // Connects this commodity's price back to actual tree counts reported
+    // in Section F for whatever scope is currently selected.
+    const cropKey = Object.keys(CROP_TO_PRICE_COMMODITY).find(k => CROP_TO_PRICE_COMMODITY[k] === c);
+    const treeCount = cropKey && cashCrops && cashCrops[cropKey] ? Number(cashCrops[cropKey].trees) || 0 : 0;
+    const yieldPerTree = cropKey ? CROP_YIELD_PER_TREE_KG[cropKey] : null;
+    let estimateHTML = '';
+    if (treeCount > 0 && yieldPerTree) {
+      const estKg = treeCount * yieldPerTree;
+      const estKgRounded = Math.round(estKg);
+      const localPrice = p.local_price_pgk_kg;
+      const estValue = localPrice != null ? Math.round(estKg * localPrice) : null;
+      estimateHTML = `<div style="background:var(--surface-2); border-radius:8px; padding:10px 12px; margin-top:10px;">
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); margin-bottom:4px;">Estimated Production (from reported trees)</div>
+        <div style="font-size:13px;">${treeCount.toLocaleString()} tree(s) reported \u00d7 ${yieldPerTree} kg/tree \u2248 <strong>${estKgRounded.toLocaleString()} kg</strong> ${esc(cropKey === 'Coffee' ? 'dry parchment' : cropKey === 'Coconut' ? 'copra' : 'dry beans')}/year</div>
+        ${estValue != null ? `<div style="font-size:13px; margin-top:2px;">At local price: \u2248 <strong>K${estValue.toLocaleString()}</strong>/year</div>` : `<div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Log a local price above to estimate value</div>`}
+        <div style="font-size:10px; color:var(--text-muted); margin-top:5px; font-style:italic;">Based on a provincial smallholder average yield, not measured ENB data — a rough estimate, not a precise figure.</div>
+      </div>`;
+    }
+
     return `<div class="review-block" style="margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border);">
       <h5 style="margin:0 0 8px; font-size:13.5px; font-weight:700; color:var(--primary-dark);">${esc(c)}</h5>
       <div class="stat-grid" style="grid-template-columns:repeat(3,1fr); gap:8px;">
@@ -843,6 +872,7 @@ function priceComparisonCardHTML(priceComparison, marketPrices) {
         <div class="stat-card" style="padding:10px; border-color:${ratioColor};"><div class="num" style="font-size:18px; color:${ratioColor};">${p.ratio_pct != null ? p.ratio_pct + '%' : '—'}</div><div class="lbl" style="font-size:10.5px;">Local as % of intl.</div></div>
       </div>
       ${p.intl_price_usd_tonne != null ? `<p style="font-size:11px; color:var(--text-muted); margin:8px 0 0;">International: $${p.intl_price_usd_tonne}/tonne${p.exchange_rate ? ` · converted at $1 = K${p.exchange_rate}${p.exchange_rate_date ? ' (' + fmtDate(p.exchange_rate_date) + ')' : ''}` : ' · no exchange rate on file yet'}</p>` : ''}
+      ${estimateHTML}
     </div>`;
   }).join('');
 
@@ -1165,7 +1195,7 @@ async function renderRecordsSummary() {
   html += barBlockHTML('E. Monthly Turnover Bracket', TURNOVER_BRACKETS.map(([c, label]) => [label, turnoverBracket[c] || 0]));
   html += barBlockHTML('E. Monthly Expenses Bracket', EXPENSE_BRACKETS.map(([c, label]) => [label, expensesBracket[c] || 0]));
   html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${(cashCrops[c] && cashCrops[c].trees) || 0} trees)`, (cashCrops[c] && cashCrops[c].blocks) || 0]));
-  html += priceComparisonCardHTML(priceComparison, marketPrices);
+  html += priceComparisonCardHTML(priceComparison, marketPrices, cashCrops);
   html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalCount]]);
   html += `<button class="btn btn-outline btn-full" id="btn-print-summary">Print / Save as PDF</button>`;
 
