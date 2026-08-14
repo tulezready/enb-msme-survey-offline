@@ -1181,8 +1181,6 @@ async function renderRecordsSummary() {
     ['Unemployed qualified members listed (Table 2)', employment.unemployed_listed]
   ]);
   if (topActivities.length) html += barBlockHTML('C. Top Business Activities', topActivities);
-  const informalActivities = (s.informal_activities || []).map(a => [a.label, a.count]);
-  if (informalActivities.length) html += barBlockHTML('G. Informal Sector — Activity Types', informalActivities);
   html += barBlockHTML('C. IPA Registration & Loans', [
     ['IPA registered — Yes', ipaLoans.ipa_yes], ['IPA registered — No', ipaLoans.ipa_no],
     ['Loan access — Yes', ipaLoans.loan_yes], ['Loan access — No', ipaLoans.loan_no]
@@ -1207,6 +1205,8 @@ async function renderRecordsSummary() {
   </div>`;
   html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${(cashCrops[c] && cashCrops[c].trees) || 0} trees)`, (cashCrops[c] && cashCrops[c].blocks) || 0]));
   html += priceComparisonCardHTML(priceComparison, marketPrices, cashCrops);
+  const informalActivities = (s.informal_activities || []).map(a => [a.label, a.count]);
+  if (informalActivities.length) html += barBlockHTML('G. Informal Sector — Activity Types', informalActivities);
   html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalCount]]);
   html += `<button class="btn btn-outline btn-full" id="btn-print-summary">Print / Save as PDF</button>`;
 
@@ -1383,13 +1383,15 @@ async function openDetail(id) {
     ]);
   } else if (status === 'informal') {
     sections += reviewBlockHTML('C.8 Loan', [['Loan access', r.business.loanAccess]], reviewSubList('Loans', r.business.loans, fmtLoan));
-    sections += reviewBlockHTML('G. Informal Sector', [], reviewSubList('Entries', r.informal.entries, fmtInformal));
   }
   {
     const cropSummary = FIXED_CROPS.filter(c => r.cashCrops.fixed[c] && (r.cashCrops.fixed[c].blocks || r.cashCrops.fixed[c].trees))
       .map(c => `${c}: ${r.cashCrops.fixed[c].blocks || 0} blocks / ${r.cashCrops.fixed[c].trees || 0} trees`);
     sections += reviewBlockHTML('F. Cash Crops', [['Comments', r.cashCrops.comments || '—']],
       reviewSubList('Fixed crops recorded', cropSummary, x => x) + reviewSubList('Other crops', r.cashCrops.others, fmtOtherCrop));
+  }
+  if (status === 'informal') {
+    sections += reviewBlockHTML('G. Informal Sector', [], reviewSubList('Entries', r.informal.entries, fmtInformal));
   }
 
   $('#detail-body').innerHTML = `
@@ -1911,13 +1913,15 @@ function renderStepReview(el) {
     ]);
   } else if (status === 'informal') {
     html += reviewBlockHTML('C.8 Loan', [['Loan access', draft.business.loanAccess || '—']], reviewSubList('Loans', draft.business.loans, fmtLoan));
-    html += reviewBlockHTML('G. Informal Sector', [], reviewSubList('Entries', draft.informal.entries, fmtInformal));
   }
   {
     const cropSummary = FIXED_CROPS.filter(c => draft.cashCrops.fixed[c] && (draft.cashCrops.fixed[c].blocks || draft.cashCrops.fixed[c].trees))
       .map(c => `${c}: ${draft.cashCrops.fixed[c].blocks || 0} blocks / ${draft.cashCrops.fixed[c].trees || 0} trees`);
     html += reviewBlockHTML('F. Cash Crops', [['Comments', draft.cashCrops.comments || '—']],
       reviewSubList('Fixed crops recorded', cropSummary, x => x) + reviewSubList('Other crops', draft.cashCrops.others, fmtOtherCrop));
+  }
+  if (status === 'informal') {
+    html += reviewBlockHTML('G. Informal Sector', [], reviewSubList('Entries', draft.informal.entries, fmtInformal));
   }
   el.innerHTML = html;
 }
