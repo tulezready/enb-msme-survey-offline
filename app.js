@@ -389,6 +389,22 @@ function stopAutosaveInterval() {
 // Jumps from Dashboard directly into Records → Summary, optionally
 // pre-scoped to a district (matching the scope selector Summary already
 // has) and scrolled to a specific anchor once the render completes.
+// Jumps from Dashboard straight into Records → the LLG list for one
+// district, so a click leads directly to "which LLGs, which wards, how
+// many" rather than the aggregate Summary view.
+function goToDistrictLLGs(district) {
+  recordsDrillLevel = 'llgs';
+  recordsDrillDistrict = district;
+  recordsDrillLLG = null;
+  recordsDrillWard = null;
+  const searchInput = $('#search-input');
+  if (searchInput) searchInput.value = ''; // a leftover query would otherwise hijack this into flat search results
+  $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'list'));
+  $('#records-list-mode').hidden = false;
+  $('#records-summary-mode').hidden = true;
+  switchView('records');
+}
+
 async function goToSummary(opts = {}) {
   switchView('records');
   $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'summary'));
@@ -522,7 +538,7 @@ async function renderDashboard() {
     <div class="review-line clickable" data-district="${esc(d)}"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
   `).join('');
   $all('#district-breakdown .review-line').forEach(el => {
-    el.addEventListener('click', () => goToSummary({ district: el.dataset.district }));
+    el.addEventListener('click', () => goToDistrictLLGs(el.dataset.district));
   });
 
   const recent = stats.recent || [];
