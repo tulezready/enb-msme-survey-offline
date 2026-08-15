@@ -569,7 +569,7 @@ function recordItemHTML(r) {
   const sub = [r.location.village, r.business.name].filter(Boolean).join(' · ') || 'No further detail';
   const statusLabel = status === 'formal' ? 'Formal' : status === 'informal' ? 'Informal' : 'No business';
   const uploadedLine = r._uploadedAt
-    ? `<strong>Uploaded:</strong> ${fmtDate(r._uploadedAt)}`
+    ? `<strong>Uploaded:</strong> ${fmtDateTime(r._uploadedAt)}`
     : `<strong>Uploaded:</strong> —`;
   return `<div class="record-item" data-id="${r.id}">
     <div class="badge ${status}">${esc(initials)}</div>
@@ -719,6 +719,12 @@ function getSortConfig() {
     case 'uploaded_asc': return { column: 'created_at', ascending: true };
     case 'collected_desc': return { column: 'date_collected', ascending: false };
     case 'collected_asc': return { column: 'date_collected', ascending: true };
+    // household_no is free text ("11 Room 19" for multi-unit dwellings, etc.)
+    // - sorting the raw column would order it alphabetically, not
+    // numerically. household_no_sort_key extracts just the leading number
+    // for a genuinely numeric sort without ever touching the original text.
+    case 'household_asc': return { column: 'household_no_sort_key', ascending: true };
+    case 'household_desc': return { column: 'household_no_sort_key', ascending: false };
     case 'uploaded_desc': default: return { column: 'created_at', ascending: false };
   }
 }
