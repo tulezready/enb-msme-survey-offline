@@ -1546,10 +1546,35 @@ async function openDetail(id) {
     ], reviewSubList('Training history', Object.entries(r.development.trainingHistory || {}), ([t, f]) => `${t}${f ? ' — Facilitator: ' + f : ''}`));
     sections += reviewBlockHTML('E. Economic Output', [
       ['Casuals', r.economic.casualsCount], ['Permanent', r.economic.permanentCount],
-      ['Turnover bracket', r.economic.turnoverBracket], ['Initial capital (K)', r.economic.initialCapital]
+      ['Turnover bracket', r.economic.turnoverBracket], ['Turnover amount (K)', r.economic.turnoverAmount],
+      ['Expenses bracket', r.economic.expensesBracket], ['Expenses amount (K)', r.economic.expensesAmount],
+      ['Initial capital (K)', r.economic.initialCapital], ['Assets value (K)', r.economic.assetsValue],
+      ['Other investments (K)', r.economic.otherInvestments]
     ]);
   } else if (status === 'informal') {
     sections += reviewBlockHTML('C.8 Loan', [['Loan access', r.business.loanAccess]], reviewSubList('Loans', r.business.loans, fmtLoan));
+  }
+  // A record whose status ISN'T formal should never carry economic-section
+  // data at all - if it does, it's leftover from before a status switch
+  // (the bug this record surfaced). Surface it explicitly rather than
+  // leaving it invisible and unfixable, since neither this view nor the
+  // edit wizard normally render Section E outside the formal path.
+  let hasLeftoverEconomic = false;
+  if (status !== 'formal') {
+    const e = r.economic || {};
+    hasLeftoverEconomic = Object.values(e).some(v => v !== '' && v != null);
+    if (hasLeftoverEconomic) {
+      sections += `<div class="review-block" style="border:1.5px solid var(--danger); border-radius:8px; padding:12px; margin-bottom:16px; background:var(--danger-light);">
+        <h4 style="color:var(--danger); border-bottom-color:var(--danger);">⚠ Leftover Economic Data</h4>
+        <p style="font-size:12.5px; margin-bottom:8px;">This record's status is "${esc(statusLabel)}", but it still carries Economic Output data from before — almost certainly left over from switching status after this section was filled in. It has no legitimate place on a ${esc(statusLabel.toLowerCase())} record.</p>
+        ${[
+          ['Turnover bracket', e.turnoverBracket], ['Turnover amount (K)', e.turnoverAmount],
+          ['Expenses bracket', e.expensesBracket], ['Expenses amount (K)', e.expensesAmount],
+          ['Initial capital (K)', e.initialCapital]
+        ].map(([k, v]) => `<div class="review-line"><span class="k">${esc(k)}</span><span class="v">${esc(v === '' || v == null ? '—' : v)}</span></div>`).join('')}
+        <button class="btn btn-danger btn-full" id="btn-clear-leftover-economic" style="margin-top:10px;">Clear This Leftover Data</button>
+      </div>`;
+    }
   }
   {
     const cropSummary = FIXED_CROPS.filter(c => r.cashCrops.fixed[c] && (r.cashCrops.fixed[c].blocks || r.cashCrops.fixed[c].trees))
@@ -1593,6 +1618,30 @@ async function openDetail(id) {
   };
   $('#btn-detail-export').onclick = () => downloadFile(`msme-${recordDisplayName(r).replace(/[,\s]+/g,'-')}.json`, JSON.stringify(r, null, 2), 'application/json');
   $('#btn-detail-print').onclick = () => { window.print(); };
+  const clearLeftoverBtn = $('#btn-clear-leftover-economic');
+  if (clearLeftoverBtn) clearLeftoverBtn.onclick = async () => {
+    if (!confirm('Clear this leftover Economic Output data? It has no legitimate place on a non-formal record and cannot be recovered once cleared.')) return;
+    clearLeftoverBtn.disabled = true;
+    clearLeftoverBtn.textContent = 'Clearing…';
+    const updated = { ...r, economic: {
+      casualsCount: '', casualsYears: '', permanentCount: '', permanentYears: '',
+      casualWageK: '', permanentWageK: '',
+      turnoverBracket: '', turnoverAmount: '', expensesBracket: '', expensesAmount: '',
+      initialCapital: '', assetsValue: '', otherInvestments: '', otherInvestmentsSpecify: ''
+    }, updatedAt: new Date().toISOString() };
+    try {
+      await upsertRecordRemote(updated);
+      const idx = recordsCache.findIndex(x => x.id === r.id);
+      if (idx >= 0) recordsCache[idx] = updated;
+      toast('Leftover data cleared');
+      openDetail(r.id);
+    } catch (err) {
+      console.error('Failed to clear leftover economic data:', err);
+      toast('Could not save — check your connection and try again');
+      clearLeftoverBtn.disabled = false;
+      clearLeftoverBtn.textContent = 'Clear This Leftover Data';
+    }
+  };
 }
 function reviewBlockHTML(title, pairs, extraHtml) {
   return `<div class="review-block card"><h4>${esc(title)}</h4>${
@@ -1785,8 +1834,56 @@ function renderStepB(el) {
     ['Name', 'Highest qualification', 'Institution', 'Year graduated', 'Comments'],
     () => renderStepB(el));
 
+  // Prevents exactly the bug that created an orphaned expenses figure on an
+  // informal record: someone starts as formal, fills in Section E, then
+  // switches to informal before saving. Section E stops being shown from
+  // that point on, but the values were still sitting in the draft and got
+  // saved anyway - invisible and uneditable afterward, since informal's own
+  // wizard path and detail view never render that section at all.
+  //
+  // Only clears a section when it WAS visible under the old status and
+  // ISN'T under the new one - a step that stays visible, or was never
+  // reached, is never touched.
+  function clearFieldsForStepsNoLongerShown(oldStatus, newStatus) {
+    const oldSteps = new Set(stepsForStatus(oldStatus));
+    const newSteps = new Set(stepsForStatus(newStatus));
+    const removed = [...oldSteps].filter(s => !newSteps.has(s));
+
+    if (removed.includes('E')) {
+      draft.economic = {
+        casualsCount: '', casualsYears: '', permanentCount: '', permanentYears: '',
+        casualWageK: '', permanentWageK: '',
+        turnoverBracket: '', turnoverAmount: '', expensesBracket: '', expensesAmount: '',
+        initialCapital: '', assetsValue: '', otherInvestments: '', otherInvestmentsSpecify: ''
+      };
+    }
+    if (removed.includes('D')) {
+      draft.development = {
+        trainingAttended: '', trainingHistory: {}, specificTrainingRequired: '',
+        trainingTypesRequired: [], assistanceRequired: [], assistanceOtherSpecify: '', comment: ''
+      };
+    }
+    if (removed.includes('C')) {
+      // The formal-only fields go regardless. loanAccess/loans/loanReasons
+      // only get cleared too if G8 (informal's own loan step) also isn't in
+      // the new path - if it IS, those fields are still relevant there.
+      draft.business.name = ''; draft.business.dateCommenced = ''; draft.business.owner = '';
+      draft.business.otherLocation = ''; draft.business.ipaRegistered = '';
+      draft.business.regForms = []; draft.business.licenses = []; draft.business.comment = '';
+      if (!newSteps.has('G8')) {
+        draft.business.loanAccess = ''; draft.business.loans = []; draft.business.loanReasons = '';
+      }
+    }
+    if (removed.includes('G')) {
+      draft.informal = { entries: [], comments: '' };
+    }
+  }
+
   $all('.status-opt', el).forEach(btn => btn.addEventListener('click', () => {
-    draft.businessStatus = btn.dataset.status;
+    const oldStatus = draft.businessStatus;
+    const newStatus = btn.dataset.status;
+    if (oldStatus && oldStatus !== newStatus) clearFieldsForStepsNoLongerShown(oldStatus, newStatus);
+    draft.businessStatus = newStatus;
     renderStepB(el);
   }));
 }
