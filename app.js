@@ -251,6 +251,64 @@ let draft = null;
 let editingExisting = false;
 let stepIndex = 0;
 let currentView = 'dashboard';
+let currentDetailId = null; // tracks which record is open, so back/forward can restore it
+
+// Real Android/iOS back-gesture support: every meaningful navigation change
+// pushes a browser history entry describing exactly where the person is, so
+// pressing back steps through the app's own navigation instead of closing
+// it outright. Search-as-you-type and sort changes deliberately don't push -
+// that would flood history with entries nobody wants to step back through.
+let suppressNavPush = false;
+function captureNavState() {
+  return {
+    view: currentView,
+    drillLevel: recordsDrillLevel, drillDistrict: recordsDrillDistrict, drillLLG: recordsDrillLLG, drillWard: recordsDrillWard,
+    flaggedCategory, flaggedLLG, flaggedWard, flaggedTitle,
+    detailId: currentDetailId,
+  };
+}
+function pushNavState() {
+  if (suppressNavPush) return;
+  history.pushState(captureNavState(), '');
+}
+// Re-enters whatever the browser's back/forward already recorded, using the
+// same entry-point functions the app normally navigates through - just with
+// pushing suppressed, so restoring never creates a duplicate history entry.
+async function restoreNavState(state) {
+  // Can't usefully restore navigation behind the lock screen - the person
+  // needs to sign back in first, and any cached data underneath is stale.
+  if (document.body.classList.contains('locked')) return;
+
+  // Only ask if there is genuinely still a draft to lose. A successful save
+  // already clears it before leaving, and a stale wizard entry sitting
+  // further back in history (from a past completed or cancelled survey)
+  // has nothing left to discard either - both cases should leave silently.
+  if (currentView === 'wizard') {
+    const stillHasDraft = await readDraft();
+    if (stillHasDraft && confirm('Discard this survey draft?')) clearDraft();
+  }
+
+  suppressNavPush = true;
+  try {
+    if (!state || !state.view) { switchView('dashboard'); return; }
+    recordsDrillLevel = state.drillLevel || 'districts';
+    recordsDrillDistrict = state.drillDistrict || null;
+    recordsDrillLLG = state.drillLLG || null;
+    recordsDrillWard = state.drillWard || null;
+    flaggedCategory = state.flaggedCategory || null;
+    flaggedLLG = state.flaggedLLG || null;
+    flaggedWard = state.flaggedWard || null;
+    flaggedTitle = state.flaggedTitle || null;
+    if (state.view === 'detail' && state.detailId) {
+      await openDetail(state.detailId);
+    } else {
+      switchView(state.view);
+    }
+  } finally {
+    suppressNavPush = false;
+  }
+}
+window.addEventListener('popstate', (e) => { restoreNavState(e.state); });
 let recordsCache = [];
 
 /* -------------------------------- utils --------------------------------- */
@@ -443,6 +501,7 @@ function switchView(view) {
   if (view === 'transfer') renderTransfer();
   if (view === 'dataquality') renderDataQuality();
   if (view === 'map') renderProvinceMap();
+  pushNavState();
 }
 
 $all('.bottomnav button').forEach(btn => {
@@ -590,6 +649,53 @@ let recordsDrillLevel = 'districts'; // 'districts' | 'llgs' | 'wards' | 'record
 let recordsDrillDistrict = null;
 let recordsDrillLLG = null;
 let recordsDrillWard = null;
+// State for the Data Quality "click through to actual records" flow - a
+// pseudo drill-level alongside the normal district/llg/ward hierarchy.
+let flaggedCategory = null, flaggedLLG = null, flaggedWard = null, flaggedTitle = null;
+
+async function renderFlaggedRecords() {
+  const breadcrumbEl = $('#records-breadcrumb');
+  if (breadcrumbEl) breadcrumbEl.innerHTML = `<button class="btn btn-outline btn-sm" id="btn-flagged-back">‹ Back to Data Quality</button> <strong style="margin-left:8px;">${esc(flaggedTitle || 'Flagged Records')}</strong>`;
+  const backBtn = $('#btn-flagged-back');
+  if (backBtn) backBtn.addEventListener('click', () => switchView('dataquality'));
+
+  const container = $('#records-list-container');
+  container.innerHTML = skeletonRows(5);
+  try {
+    const { data, error } = await sb.rpc('get_flagged_records', { p_category: flaggedCategory, p_llg: flaggedLLG || null, p_ward: flaggedWard || null });
+    if (error) throw error;
+    const list = (data || []).map(row => ({ ...row.data, _uploadedAt: row.created_at }));
+    if (list.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">✅</div><p>No records currently match this — it may have already been corrected.</p></div>`;
+    } else {
+      container.innerHTML = list.map(recordItemHTML).join('');
+      $all('.record-item', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
+    }
+  } catch (e) {
+    console.error('Failed to load flagged records:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-flagged">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-flagged');
+    if (retryBtn) retryBtn.addEventListener('click', renderFlaggedRecords);
+  }
+}
+
+// Sets the flagged-records state, then switches into Records/List mode -
+// mirrors goToDistrictLLGs' established pattern exactly, including clearing
+// any leftover search text that would otherwise hijack the view.
+function goToFlaggedRecords(category, llg, ward, title) {
+  recordsDrillLevel = 'flagged';
+  flaggedCategory = category;
+  flaggedLLG = llg || null;
+  flaggedWard = ward || null;
+  flaggedTitle = title;
+  const searchInput = $('#search-input');
+  if (searchInput) searchInput.value = '';
+  $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'list'));
+  $('#records-list-mode').hidden = false;
+  $('#records-summary-mode').hidden = true;
+  switchView('records');
+}
 
 function drillInto(level, district, llg) {
   recordsDrillLevel = level;
@@ -598,6 +704,7 @@ function drillInto(level, district, llg) {
   renderRecordsList._page = 1;
   renderRecordsList._resetPage = false;
   renderRecordsList();
+  pushNavState();
 }
 
 function renderBreadcrumb() {
@@ -647,6 +754,7 @@ async function renderRecordsList() {
     await renderFlatSearch(q);
     return;
   }
+  if (recordsDrillLevel === 'flagged') return renderFlaggedRecords();
   if (recordsDrillLevel === 'districts') return renderDistrictLevel();
   if (recordsDrillLevel === 'llgs') return renderLLGLevel();
   if (recordsDrillLevel === 'wards') return renderWardLevel();
@@ -1405,6 +1513,7 @@ async function renderRecordsSummary() {
 
 /* -------------------------------- detail view ------------------------------- */
 async function openDetail(id) {
+  currentDetailId = id;
   let r = recordsCache.find(x => x.id === id);
   if (!r) {
     try { r = await fetchRecordById(id); }
@@ -1542,8 +1651,7 @@ function renderWizard() {
   if (backBtn) backBtn.addEventListener('click', () => { stepIndex--; renderWizard(); });
   const cancelBtn = $('#btn-wiz-cancel');
   if (cancelBtn) cancelBtn.addEventListener('click', () => {
-    if (confirm('Discard this survey draft?')) { clearDraft(); switchView('dashboard'); }
-    else switchView('dashboard');
+    history.back(); // triggers the same discard-confirmation restoreNavState already handles
   });
   $('#btn-wiz-next').addEventListener('click', () => {
     if (stepId === 'REVIEW') { saveDraftRecord(); return; }
@@ -2120,7 +2228,7 @@ async function renderDataQuality() {
     count: missing.total,
     severity: missing.total > 0 ? 'warn' : 'ok',
     body: missing.total === 0 ? '' : `<p style="font-size:12.5px; color:var(--text-muted); margin-bottom:8px;">These records were saved without ever recording formal, informal, or none — likely an incomplete survey.</p>` +
-      missing.by_llg.map(x => `<div class="review-line"><span class="k">${esc(x.llg)}</span><span class="v">${x.count}</span></div>`).join('')
+      missing.by_llg.map(x => `<div class="review-line clickable" data-flag="missing_business_status" data-llg="${esc(x.llg)}" data-title="Missing Business Status \u2014 ${esc(x.llg)}"><span class="k">${esc(x.llg)}</span><span class="v">${x.count}</span></div>`).join('')
   });
 
   const neg = r.negative_cash_crop_values || [];
@@ -2155,20 +2263,22 @@ async function renderDataQuality() {
     title: 'Ward Name Not in Official List',
     count: wardMismatches.length,
     severity: wardMismatches.length > 0 ? 'warn' : 'ok',
-    body: wardMismatches.map(x => `<div class="review-line"><span class="k">${esc(x.llg)} \u2014 "${esc(x.ward)}"</span><span class="v">${x.count} record(s)</span></div>`).join('')
+    body: wardMismatches.map(x => `<div class="review-line clickable" data-flag="ward_mismatch" data-llg="${esc(x.llg)}" data-ward="${esc(x.ward)}" data-title="Ward Name Not in Official List \u2014 ${esc(x.llg)} \u201c${esc(x.ward)}\u201d"><span class="k">${esc(x.llg)} \u2014 "${esc(x.ward)}"</span><span class="v">${x.count} record(s)</span></div>`).join('')
   });
 
   sections.push({
     title: 'Missing Date Collected',
     count: r.missing_date_collected || 0,
     severity: (r.missing_date_collected || 0) > 0 ? 'warn' : 'ok',
-    body: ''
+    body: '',
+    wholeCardFlag: (r.missing_date_collected || 0) > 0 ? 'missing_date_collected' : null
   });
   sections.push({
     title: 'Missing Village',
     count: r.missing_village || 0,
     severity: (r.missing_village || 0) > 0 ? 'warn' : 'ok',
-    body: ''
+    body: '',
+    wholeCardFlag: (r.missing_village || 0) > 0 ? 'missing_village' : null
   });
 
   const totalIssues = sections.reduce((sum, s) => sum + s.count, 0);
@@ -2179,7 +2289,7 @@ async function renderDataQuality() {
   </div>`;
 
   html += sections.map(s => `
-    <div class="review-block card" style="border-left:3px solid ${colorFor(s.severity)};">
+    <div class="review-block card ${s.wholeCardFlag ? 'clickable' : ''}" style="border-left:3px solid ${colorFor(s.severity)};" ${s.wholeCardFlag ? `data-flag="${esc(s.wholeCardFlag)}" data-title="${esc(s.title)}"` : ''}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:${s.body ? '8px' : '0'};">
         <h4 style="margin:0;">${esc(s.title)}</h4>
         <span style="font-family:var(--font-mono); font-weight:700; color:${colorFor(s.severity)};">${s.count}</span>
@@ -2191,6 +2301,12 @@ async function renderDataQuality() {
   container.innerHTML = html;
   $all('#dataquality-content .review-line.clickable[data-id]').forEach(el => {
     el.addEventListener('click', () => openDetail(el.dataset.id));
+  });
+  $all('#dataquality-content [data-flag]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation(); // a sub-row's own click must not also fire its parent card's whole-card handler
+      goToFlaggedRecords(el.dataset.flag, el.dataset.llg, el.dataset.ward, el.dataset.title);
+    });
   });
 }
 $('#btn-open-dataquality').addEventListener('click', () => switchView('dataquality'));
@@ -2604,6 +2720,9 @@ async function finishLogin() {
   document.body.classList.remove('locked');
   resetInactivityTimer();
   renderDashboard();
+  // replaceState, not pushState - Dashboard is the true home screen, so
+  // back from here should exit the app normally, not "undo" into a blank state.
+  history.replaceState(captureNavState(), '');
 }
 
 async function initLockScreen() {
