@@ -8,6 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <style>
 :root{
   --bg:#0E1613;
@@ -563,6 +564,11 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <div class="section-title">By district</div>
   <div class="card" id="district-breakdown"></div>
 
+  <div style="display:flex; gap:10px; margin:14px 0;">
+    <button class="row-action" id="btn-open-map" style="flex:1; margin-bottom:0;"><div class="icon">🗺️</div><div class="txt"><strong>Province Map</strong><span>See coverage across all 23 LLGs</span></div><div class="chev">›</div></button>
+    <button class="row-action" id="btn-open-dataquality" style="flex:1; margin-bottom:0;"><div class="icon">🔎</div><div class="txt"><strong>Data Quality</strong><span>Records worth a second look</span></div><div class="chev">›</div></button>
+  </div>
+
   <div class="section-title">Recent records</div>
   <div id="recent-list"></div>
 </div>
@@ -674,6 +680,22 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   </div>
 </div>
 
+<div id="view-dataquality" class="view" hidden>
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+    <button class="btn btn-outline" id="btn-dataquality-back" style="padding:8px 14px;">‹ Back</button>
+    <h2 style="margin:0; font-family:var(--font-display); font-size:19px; color:var(--primary-dark);">Data Quality</h2>
+  </div>
+  <div id="dataquality-content"></div>
+</div>
+
+<div id="view-map" class="view" hidden>
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+    <button class="btn btn-outline" id="btn-map-back" style="padding:8px 14px;">‹ Back</button>
+    <h2 style="margin:0; font-family:var(--font-display); font-size:19px; color:var(--primary-dark);">Province Map</h2>
+  </div>
+  <div id="map-content"></div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <div class="bottomnav">
@@ -682,6 +704,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <button data-view="transfer"><span class="ic">🔄</span>Transfer</button>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="app.js"></script>
 </body>

@@ -428,7 +428,7 @@ function switchView(view) {
   if (view !== 'wizard') stopAutosaveInterval();
   const twoPane = window.innerWidth >= 900 && view === 'detail';
   document.body.classList.toggle('two-pane', twoPane);
-  ['dashboard', 'records', 'wizard', 'detail', 'transfer'].forEach(v => {
+  ['dashboard', 'records', 'wizard', 'detail', 'transfer', 'dataquality', 'map'].forEach(v => {
     let shouldHide = (v !== view);
     if (twoPane && v === 'records') shouldHide = false; // keep the list visible alongside the detail panel
     $('#view-' + v).hidden = shouldHide;
@@ -441,6 +441,8 @@ function switchView(view) {
   if (view === 'dashboard') renderDashboard();
   if (view === 'records' || twoPane) renderRecordsList();
   if (view === 'transfer') renderTransfer();
+  if (view === 'dataquality') renderDataQuality();
+  if (view === 'map') renderProvinceMap();
 }
 
 $all('.bottomnav button').forEach(btn => {
@@ -2085,6 +2087,220 @@ async function loadDeletedRecords() {
     container.innerHTML = `<p class="hint">Could not load — check your connection.</p>`;
   }
 }
+async function renderDataQuality() {
+  const container = $('#dataquality-content');
+  container.innerHTML = skeletonRows(4);
+  let r;
+  try {
+    const { data, error } = await sb.rpc('get_data_quality_report');
+    if (error) throw error;
+    r = data;
+  } catch (e) {
+    console.error('Failed to load data quality report:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-dq">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-dq');
+    if (retryBtn) retryBtn.addEventListener('click', renderDataQuality);
+    return;
+  }
+
+  // Ward-name mismatches are computed here, client-side, against the same
+  // WARDS_BY_LLG list the wizard and drill-down browser already use as the
+  // single source of truth - never duplicated into SQL.
+  const wardMismatches = (r.distinct_wards_in_use || []).filter(w => {
+    const official = WARDS_BY_LLG[w.llg] || [];
+    return official.length > 0 && !official.includes(w.ward);
+  });
+
+  const sections = [];
+
+  const missing = r.missing_business_status || { total: 0, by_llg: [] };
+  sections.push({
+    title: 'Missing Business Status',
+    count: missing.total,
+    severity: missing.total > 0 ? 'warn' : 'ok',
+    body: missing.total === 0 ? '' : `<p style="font-size:12.5px; color:var(--text-muted); margin-bottom:8px;">These records were saved without ever recording formal, informal, or none — likely an incomplete survey.</p>` +
+      missing.by_llg.map(x => `<div class="review-line"><span class="k">${esc(x.llg)}</span><span class="v">${x.count}</span></div>`).join('')
+  });
+
+  const neg = r.negative_cash_crop_values || [];
+  sections.push({
+    title: 'Negative Cash Crop Values',
+    count: neg.length,
+    severity: neg.length > 0 ? 'bad' : 'ok',
+    body: neg.map(x => `<div class="review-line clickable" data-id="${esc(x.id)}"><span class="k">${esc(x.llg)} · HH ${esc(x.household_no || '—')} · ${esc(x.crop)}</span><span class="v" style="color:var(--danger);">${esc(x.field)}: ${esc(x.value)}</span></div>`).join('')
+  });
+
+  const tMismatch = r.turnover_bracket_mismatch || [];
+  const eMismatch = r.expenses_bracket_mismatch || [];
+  const bracketLabel = (kind, b) => {
+    const t = { a: '<K60,000', b: 'K60,001–250,000', c: 'K250,001–5,000,000', d: '>K5,000,000' };
+    const e = { '1': '<K5,000', '2': 'K5,001–250,000', '3': 'K250,001–500,000', '4': '>K500,001' };
+    return kind === 'turnover' ? t[b] : e[b];
+  };
+  sections.push({
+    title: 'Turnover Amount Doesn\u2019t Match Selected Bracket',
+    count: tMismatch.length,
+    severity: tMismatch.length > 0 ? 'warn' : 'ok',
+    body: tMismatch.map(x => `<div class="review-line clickable" data-id="${esc(x.id)}"><span class="k">${esc(x.llg)}</span><span class="v">K${Number(x.amount).toLocaleString()} in bracket "${esc(bracketLabel('turnover', x.bracket))}"</span></div>`).join('')
+  });
+  sections.push({
+    title: 'Expenses Amount Doesn\u2019t Match Selected Bracket',
+    count: eMismatch.length,
+    severity: eMismatch.length > 0 ? 'warn' : 'ok',
+    body: eMismatch.map(x => `<div class="review-line clickable" data-id="${esc(x.id)}"><span class="k">${esc(x.llg)}</span><span class="v">K${Number(x.amount).toLocaleString()} in bracket "${esc(bracketLabel('expenses', x.bracket))}"</span></div>`).join('')
+  });
+
+  sections.push({
+    title: 'Ward Name Not in Official List',
+    count: wardMismatches.length,
+    severity: wardMismatches.length > 0 ? 'warn' : 'ok',
+    body: wardMismatches.map(x => `<div class="review-line"><span class="k">${esc(x.llg)} \u2014 "${esc(x.ward)}"</span><span class="v">${x.count} record(s)</span></div>`).join('')
+  });
+
+  sections.push({
+    title: 'Missing Date Collected',
+    count: r.missing_date_collected || 0,
+    severity: (r.missing_date_collected || 0) > 0 ? 'warn' : 'ok',
+    body: ''
+  });
+  sections.push({
+    title: 'Missing Village',
+    count: r.missing_village || 0,
+    severity: (r.missing_village || 0) > 0 ? 'warn' : 'ok',
+    body: ''
+  });
+
+  const totalIssues = sections.reduce((sum, s) => sum + s.count, 0);
+  const colorFor = sev => sev === 'bad' ? 'var(--danger)' : sev === 'warn' ? 'var(--accent-dark)' : 'var(--primary)';
+
+  let html = `<div class="warn-box" style="background:${totalIssues > 0 ? 'var(--accent-light)' : 'var(--success-light)'}; color:${totalIssues > 0 ? '#8A4A05' : 'var(--success)'};">
+    ${totalIssues === 0 ? 'No data quality issues currently detected.' : `${totalIssues} record(s) across all categories below are worth a second look.`}
+  </div>`;
+
+  html += sections.map(s => `
+    <div class="review-block card" style="border-left:3px solid ${colorFor(s.severity)};">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:${s.body ? '8px' : '0'};">
+        <h4 style="margin:0;">${esc(s.title)}</h4>
+        <span style="font-family:var(--font-mono); font-weight:700; color:${colorFor(s.severity)};">${s.count}</span>
+      </div>
+      ${s.body}
+    </div>
+  `).join('');
+
+  container.innerHTML = html;
+  $all('#dataquality-content .review-line.clickable[data-id]').forEach(el => {
+    el.addEventListener('click', () => openDetail(el.dataset.id));
+  });
+}
+$('#btn-open-dataquality').addEventListener('click', () => switchView('dataquality'));
+$('#btn-dataquality-back').addEventListener('click', () => switchView('dashboard'));
+$('#btn-open-map').addEventListener('click', () => switchView('map'));
+$('#btn-map-back').addEventListener('click', () => switchView('dashboard'));
+// Real center coordinates for all 23 LLGs. Most sourced individually;
+// several share a coordinate with their officially paired LLG (e.g.
+// Livuan/Reimber, Vunadidir/Toma, Central/Inland Pomio, West Pomio/Mamusi
+// are administratively linked pairs with one documented center point each).
+// Open Bay Rural and Watom Island Rural have no precisely documented
+// standalone coordinate and are reasonable approximations, marked as such.
+const LLG_COORDS = {
+  'Central Gazelle Rural': [-4.34921, 152.04147],
+  'Inland Baining Rural': [-4.37939, 151.96969],
+  'Lassul Baining Rural': [-4.22741, 151.69138],
+  'Open Bay Rural': [-4.21000, 151.72000], // approximate - no precise standalone source found
+  'Vunadidir Rural': [-4.35491, 152.14410],
+  'Toma Rural': [-4.35491, 152.14410],
+  'Bitapaka Rural': [-4.40409, 152.30197],
+  'Duke of York Rural': [-4.20044, 152.47690],
+  'Kokopo-Vunamami Urban': [-4.33017, 152.25522],
+  'Raluana Rural': [-4.30535, 152.22032],
+  'Rabaul Urban': [-4.19762, 152.17788],
+  'Balanataman Rural': [-4.15720, 152.14818],
+  'Kombiu Rural': [-4.17493, 152.19886],
+  'Watom Island Rural': [-4.13000, 152.10000], // approximate - no precise standalone source found
+  'Livuan Rural': [-4.24914, 152.08979],
+  'Reimber Rural': [-4.24914, 152.08979],
+  'Central Pomio Rural': [-5.52118, 151.51752],
+  'Inland Pomio Rural': [-5.52118, 151.51752],
+  'East Pomio Rural': [-5.19404, 151.99116],
+  'Melkoi Rural': [-5.99996, 150.98359],
+  'Sinivit Rural': [-4.97038, 152.04350],
+  'West Pomio Rural': [-5.63033, 151.49322],
+  'Mamusi Rural': [-5.63033, 151.49322],
+};
+const LLG_COORDS_APPROXIMATE = new Set(['Open Bay Rural', 'Watom Island Rural']);
+
+let leafletMapInstance = null;
+
+async function renderProvinceMap() {
+  const container = $('#map-content');
+  container.innerHTML = `<p style="font-size:12.5px; color:var(--text-muted); margin-bottom:10px;">Circle size and color both reflect how many records have been collected in each LLG — bigger and darker green means more coverage. Tap a circle for details.</p>
+    <div id="leaflet-map" style="height:60vh; min-height:380px; border-radius:12px; overflow:hidden; border:1px solid var(--border);"></div>
+    <div id="map-legend" style="display:flex; align-items:center; gap:10px; margin-top:10px; font-size:11.5px; color:var(--text-muted);">
+      <span>Less coverage</span>
+      <div style="flex:1; height:8px; border-radius:4px; background:linear-gradient(90deg, #C9C2B4, var(--accent), var(--primary));"></div>
+      <span>More coverage</span>
+    </div>
+    <p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Open Bay Rural and Watom Island Rural are shown at an approximate position — no precisely documented coordinate was found for either during research. All other positions are individually sourced.</p>`;
+
+  let mapData;
+  try {
+    const { data, error } = await sb.rpc('get_map_data');
+    if (error) throw error;
+    mapData = data || [];
+  } catch (e) {
+    console.error('Failed to load map data:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-map">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-map');
+    if (retryBtn) retryBtn.addEventListener('click', renderProvinceMap);
+    return;
+  }
+
+  // Leaflet needs a fresh instance each time this view opens, since the
+  // container div itself is destroyed and rebuilt whenever the view
+  // switches away and back.
+  if (leafletMapInstance) { leafletMapInstance.remove(); leafletMapInstance = null; }
+  const map = L.map('leaflet-map', { scrollWheelZoom: false }).setView([-4.9, 151.9], 8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 14
+  }).addTo(map);
+  leafletMapInstance = map;
+
+  const maxTotal = Math.max(1, ...mapData.map(d => d.total));
+  mapData.forEach(d => {
+    const coord = LLG_COORDS[d.llg];
+    if (!coord) return; // defensive - every official LLG has a coordinate above, but never let one bad entry break the whole map
+    const frac = d.total / maxTotal; // 0..1, coverage relative to the best-covered LLG
+    const radius = d.total === 0 ? 5 : 6 + Math.round(Math.sqrt(frac) * 22);
+    const color = d.total === 0 ? '#C9C2B4' : frac > 0.5 ? '#153F38' : frac > 0.15 ? '#2F6B4F' : '#D97706';
+    const marker = L.circleMarker(coord, {
+      radius, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.85
+    }).addTo(map);
+    const approxNote = LLG_COORDS_APPROXIMATE.has(d.llg) ? '<br><span style="font-style:italic; color:#8A4A05;">Approximate position</span>' : '';
+    marker.bindPopup(`
+      <strong>${esc(d.llg)}</strong><br>${esc(d.district)} District<br>
+      <strong>${d.total}</strong> record(s) total<br>
+      Formal: ${d.formal} · Informal: ${d.informal} · No business: ${d.none}
+      ${approxNote}<br>
+      <button style="margin-top:6px; padding:5px 10px; border-radius:6px; border:1px solid #153F38; background:#153F38; color:#fff; font-size:12px; cursor:pointer;" onclick="window.__mapGoToLLG('${esc(d.district)}','${esc(d.llg)}')">View Records</button>
+    `);
+  });
+}
+
+// Bridges a Leaflet popup's inline onclick (which can't reach ES-scoped
+// functions directly) back into the app's own drill-down navigation.
+window.__mapGoToLLG = function(district, llg) {
+  switchView('records');
+  const searchInput = $('#search-input');
+  if (searchInput) searchInput.value = '';
+  $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'list'));
+  $('#records-list-mode').hidden = false;
+  $('#records-summary-mode').hidden = true;
+  drillInto('wards', district, llg);
+};
+
 $('#btn-view-deleted').addEventListener('click', loadDeletedRecords);
 $('#btn-sign-out').addEventListener('click', async () => {
   clearTimeout(inactivityTimer);
