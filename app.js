@@ -386,6 +386,27 @@ function stopAutosaveInterval() {
   if (autosaveInterval) { clearInterval(autosaveInterval); autosaveInterval = null; }
 }
 
+// Jumps from Dashboard directly into Records → Summary, optionally
+// pre-scoped to a district (matching the scope selector Summary already
+// has) and scrolled to a specific anchor once the render completes.
+async function goToSummary(opts = {}) {
+  switchView('records');
+  $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'summary'));
+  $('#records-list-mode').hidden = true;
+  $('#records-summary-mode').hidden = false;
+  // Always set scope explicitly, one way or the other - the Dashboard's own
+  // numbers are always province-wide, so a click from there must never land
+  // on a stale district/LLG/ward left over from an earlier Summary visit.
+  renderRecordsSummary._district = opts.district || null;
+  renderRecordsSummary._llg = null;
+  renderRecordsSummary._ward = null;
+  await renderRecordsSummary();
+  if (opts.scrollTo) {
+    const el = document.getElementById(opts.scrollTo);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 function switchView(view) {
   currentView = view;
   if (view !== 'wizard') stopAutosaveInterval();
@@ -487,9 +508,22 @@ async function renderDashboard() {
   animateCountUp($('#stat-formal'), stats.formal);
   animateCountUp($('#stat-informal'), stats.informal);
 
+  // Formal/Informal jump straight to the matching composition section in
+  // Summary. Total records and This week are deliberately left as plain
+  // numbers for now - discussed and agreed those need their own decisions
+  // first (records list vs. aggregate view, and whether "this week" becomes
+  // a real time-scope alongside the existing geographic one).
+  $('#stat-formal').closest('.stat-card').classList.add('clickable');
+  $('#stat-formal').closest('.stat-card').onclick = () => goToSummary({ scrollTo: 'summary-status-anchor' });
+  $('#stat-informal').closest('.stat-card').classList.add('clickable');
+  $('#stat-informal').closest('.stat-card').onclick = () => goToSummary({ scrollTo: 'summary-status-anchor' });
+
   dEl.innerHTML = DISTRICTS.map(d => `
-    <div class="review-line"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
+    <div class="review-line clickable" data-district="${esc(d)}"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
   `).join('');
+  $all('#district-breakdown .review-line').forEach(el => {
+    el.addEventListener('click', () => goToSummary({ district: el.dataset.district }));
+  });
 
   const recent = stats.recent || [];
   if (recent.length === 0) {
@@ -1135,7 +1169,7 @@ async function renderRecordsSummary() {
 
   html += marketPricesCardHTML(marketPrices);
 
-  html += `<div class="stat-grid">
+  html += `<div class="stat-grid" id="summary-status-anchor">
     <div class="stat-card"><div class="num" data-countup="${total}">0</div><div class="lbl">Total surveyed</div></div>
     <div class="stat-card accent"><div class="num" data-countup="${byStatus.formal}">0</div><div class="lbl">Formal business</div></div>
     <div class="stat-card"><div class="num" data-countup="${byStatus.informal}">0</div><div class="lbl">Informal sector</div></div>
