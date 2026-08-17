@@ -1,4 +1,4 @@
-const CACHE_NAME = 'msme-survey-hq-v58';
+const CACHE_NAME = 'msme-survey-hq-v59';
 const APP_SHELL = [
   './index.html',
   './app.js',

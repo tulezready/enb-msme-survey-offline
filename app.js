@@ -1347,6 +1347,14 @@ async function renderRecordsSummary() {
     ['Unemployed qualified members listed (Table 2)', employment.unemployed_listed]
   ]);
   if (topActivities.length) html += barBlockHTML('C. Top Business Activities', topActivities);
+  const otherActivities = (s.other_activities_specified || []).map(a => [a.label, a.count]);
+  if (otherActivities.length) {
+    html += `<div class="review-block card">
+      <h4>C. "Others" Specified</h4>
+      <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Free-text entries from the "Others (specify)" field, grouped where the same activity was described in slightly different words.</p>
+      ${otherActivities.map(([label, count]) => `<div class="review-line"><span class="k">${esc(label)}</span><span class="v">${count}</span></div>`).join('')}
+    </div>`;
+  }
   html += barBlockHTML('C. IPA Registration & Loans', [
     ['IPA registered — Yes', ipaLoans.ipa_yes], ['IPA registered — No', ipaLoans.ipa_no],
     ['Loan access — Yes', ipaLoans.loan_yes], ['Loan access — No', ipaLoans.loan_no]
