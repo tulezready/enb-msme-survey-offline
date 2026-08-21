@@ -659,6 +659,10 @@ async function renderFlaggedRecords() {
   const backBtn = $('#btn-flagged-back');
   if (backBtn) backBtn.addEventListener('click', () => switchView('dataquality'));
 
+  if (flaggedCategory === 'missing_business_status' && flaggedLLG) {
+    return renderMissingStatusBatch();
+  }
+
   const container = $('#records-list-container');
   container.innerHTML = skeletonRows(5);
   try {
@@ -677,6 +681,81 @@ async function renderFlaggedRecords() {
       <button class="btn btn-outline" id="btn-retry-flagged">Retry</button></div>`;
     const retryBtn = $('#btn-retry-flagged');
     if (retryBtn) retryBtn.addEventListener('click', renderFlaggedRecords);
+  }
+}
+
+// Missing Business Status is the one Data Quality category where the
+// record's own existing data can genuinely indicate the right answer - not
+// a guess, but what the survey wizard itself would have produced for that
+// status (e.g. cash crop data present, nothing from any status-specific
+// section = matches "no business" exactly). Records without a clear match
+// stay individually reviewable, never swept into a batch action.
+async function renderMissingStatusBatch() {
+  const container = $('#records-list-container');
+  container.innerHTML = skeletonRows(5);
+  try {
+    const { data, error } = await sb.rpc('get_missing_status_records_with_evidence', { p_llg: flaggedLLG, p_ward: flaggedWard || null });
+    if (error) throw error;
+    const records = data || [];
+    if (records.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">✅</div><p>No records currently match this — it may have already been corrected.</p></div>`;
+      return;
+    }
+    const suggested = records.filter(r => r.suggested_status);
+    const unclear = records.filter(r => !r.suggested_status);
+
+    let html = '';
+    if (suggested.length > 0) {
+      html += `<div class="card" style="border:1.5px solid var(--primary); margin-bottom:16px;">
+        <h4 style="margin:0 0 8px;">${suggested.length} record(s) look like genuine "No Business" households</h4>
+        <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:10px;">Every one of these has cash crop data (asked of every household regardless of status) but nothing at all from the formal or informal sections — exactly what the survey produces when "No business" is selected. Not a guess: this is what the record's own data already shows.</p>
+        <button class="btn btn-outline btn-sm" id="btn-toggle-suggested-list">Show the list</button>
+        <div id="suggested-list" hidden style="margin-top:10px; max-height:260px; overflow-y:auto; border-top:1px solid var(--border); padding-top:8px;">
+          ${suggested.map(r => `<div class="review-line" style="font-size:12.5px;"><span class="k">${esc(r.ward)} · HH ${esc(r.household_no || '—')} · ${esc(r.village || '—')}</span><span class="v">${esc(r.date_collected || '—')}</span></div>`).join('')}
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-apply-suggested" style="margin-top:12px;">Apply "No Business" to All ${suggested.length}</button>
+      </div>`;
+    }
+    if (unclear.length > 0) {
+      html += `<div class="card" style="margin-bottom:16px;">
+        <h4 style="margin:0 0 8px;">${unclear.length} record(s) need individual review</h4>
+        <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:10px;">These don't have cash crop data either — genuinely incomplete rather than clearly "no business." Nothing here reliably indicates the right status, so each needs a real look rather than a batch guess.</p>
+        ${unclear.map(r => `<div class="review-line clickable" data-id="${esc(r.id)}"><span class="k">${esc(r.ward)} · HH ${esc(r.household_no || '—')} · ${esc(r.village || '—')}</span><span class="v">${esc(r.date_collected || '—')}</span></div>`).join('')}
+      </div>`;
+    }
+    container.innerHTML = html;
+
+    const toggleBtn = $('#btn-toggle-suggested-list');
+    const listEl = $('#suggested-list');
+    if (toggleBtn && listEl) toggleBtn.addEventListener('click', () => {
+      listEl.hidden = !listEl.hidden;
+      toggleBtn.textContent = listEl.hidden ? 'Show the list' : 'Hide the list';
+    });
+    const applyBtn = $('#btn-apply-suggested');
+    if (applyBtn) applyBtn.addEventListener('click', async () => {
+      if (!confirm(`Set business status to "None" for all ${suggested.length} of these records? This can be undone afterward by editing any record individually, but not in bulk.`)) return;
+      applyBtn.disabled = true;
+      applyBtn.textContent = 'Applying…';
+      try {
+        const ids = suggested.map(r => r.id);
+        const { data: updatedCount, error: applyError } = await sb.rpc('bulk_set_business_status', { record_ids: ids, new_status: 'none' });
+        if (applyError) throw applyError;
+        toast(`${updatedCount} record(s) updated`);
+        renderMissingStatusBatch();
+      } catch (e) {
+        console.error('Bulk status update failed:', e);
+        toast('Could not save — check your connection and try again');
+        applyBtn.disabled = false;
+        applyBtn.textContent = `Apply "No Business" to All ${suggested.length}`;
+      }
+    });
+    $all('.review-line.clickable[data-id]', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
+  } catch (e) {
+    console.error('Failed to load missing-status records with evidence:', e);
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-flagged">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-flagged');
+    if (retryBtn) retryBtn.addEventListener('click', renderMissingStatusBatch);
   }
 }
 
