@@ -570,6 +570,8 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     <div class="stat-card"><div class="num" id="stat-informal">0</div><div class="lbl">Informal sector</div></div>
   </div>
 
+  <div class="card" id="stale-llgs-card" hidden style="border:1.5px solid var(--accent-dark); background:var(--accent-light);"></div>
+
   <div class="section-title">By district</div>
   <div class="card" id="district-breakdown"></div>
 
@@ -673,6 +675,28 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <div class="card">
     <div class="review-line"><span class="k">Signed in as</span><span class="v" id="account-email">—</span></div>
     <button class="btn btn-outline btn-full" style="margin-top:12px;" id="btn-sign-out">Sign out</button>
+  </div>
+
+  <div class="section-title">District Access</div>
+  <div class="card">
+    <p style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Manage which logins have District-level access. Creating the login itself still has to happen in Supabase directly — this only links an existing login to a district.</p>
+    <div id="district-accounts-list"></div>
+    <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+      <div class="field"><label>Email (must already exist as a Supabase login)</label>
+        <input type="email" id="link-account-email" placeholder="name@example.com">
+      </div>
+      <div class="field"><label>District</label>
+        <select id="link-account-district">
+          <option value="">Select district…</option>
+          <option value="Gazelle">Gazelle</option>
+          <option value="Kokopo">Kokopo</option>
+          <option value="Pomio">Pomio</option>
+          <option value="Rabaul">Rabaul</option>
+        </select>
+      </div>
+      <div class="lock-error" id="link-account-error"></div>
+      <button class="btn btn-primary btn-full" id="btn-link-account">Link Account</button>
+    </div>
   </div>
 
   <div class="section-title">Database</div>

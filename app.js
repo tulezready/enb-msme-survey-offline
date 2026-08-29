@@ -463,6 +463,22 @@ function goToDistrictLLGs(district) {
   switchView('records');
 }
 
+// Jumps straight to a specific LLG's ward list, given both district and
+// LLG - skips the intermediate LLG-list step entirely, since the Stale
+// LLGs alert already knows exactly which LLG needs looking at.
+function goToSpecificLLG(district, llg) {
+  recordsDrillLevel = 'wards';
+  recordsDrillDistrict = district;
+  recordsDrillLLG = llg;
+  recordsDrillWard = null;
+  const searchInput = $('#search-input');
+  if (searchInput) searchInput.value = '';
+  $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'list'));
+  $('#records-list-mode').hidden = false;
+  $('#records-summary-mode').hidden = true;
+  switchView('records');
+}
+
 async function goToSummary(opts = {}) {
   switchView('records');
   $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'summary'));
@@ -594,6 +610,43 @@ async function renderDashboard() {
   $('#stat-formal').closest('.stat-card').onclick = () => goToSummary({ scrollTo: 'summary-status-anchor' });
   $('#stat-informal').closest('.stat-card').classList.add('clickable');
   $('#stat-informal').closest('.stat-card').onclick = () => goToSummary({ scrollTo: 'summary-status-anchor' });
+
+  // Surfaces LLGs that have gone quiet BEFORE that becomes a real incident -
+  // built directly out of the Central Gazelle situation, where nearly three
+  // weeks of silence went unnoticed until the device itself was found
+  // stranded.
+  const staleCard = $('#stale-llgs-card');
+  if (staleCard) {
+    try {
+      const { data: staleData, error: staleError } = await sb.rpc('get_stale_llgs', { p_days_threshold: 10 });
+      if (staleError) throw staleError;
+      const stale = staleData || [];
+      if (stale.length === 0) {
+        staleCard.hidden = true;
+      } else {
+        staleCard.hidden = false;
+        staleCard.innerHTML = `
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <span style="font-size:18px;">⏱️</span>
+            <strong style="font-size:14px;">${stale.length} LLG(s) haven't reported in a while</strong>
+          </div>
+          ${stale.slice(0, 6).map(s => `
+            <div class="review-line clickable" data-district="${esc(s.district)}" data-llg="${esc(s.llg)}">
+              <span class="k">${esc(s.llg)}</span>
+              <span class="v" style="color:${s.never_reported ? 'var(--danger)' : 'var(--accent-dark)'};">${s.never_reported ? 'Never reported' : s.days_since_upload + ' days ago'}</span>
+            </div>
+          `).join('')}
+          ${stale.length > 6 ? `<p style="font-size:11.5px; color:var(--text-muted); margin-top:6px;">+ ${stale.length - 6} more</p>` : ''}
+        `;
+        $all('.review-line.clickable[data-llg]', staleCard).forEach(el => {
+          el.addEventListener('click', () => goToSpecificLLG(el.dataset.district, el.dataset.llg));
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load stale LLGs:', e);
+      staleCard.hidden = true; // fails silently - this is a helpful nudge, not core functionality, and shouldn't block the rest of Dashboard
+    }
+  }
 
   dEl.innerHTML = DISTRICTS.map(d => `
     <div class="review-line clickable" data-district="${esc(d)}"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
@@ -2405,7 +2458,71 @@ async function renderTransfer() {
   const { data: { user } } = await sb.auth.getUser();
   const emailEl = $('#account-email');
   if (emailEl) emailEl.textContent = user ? user.email : '—';
+  renderDistrictAccountsList();
 }
+
+async function renderDistrictAccountsList() {
+  const listEl = $('#district-accounts-list');
+  if (!listEl) return;
+  listEl.innerHTML = skeletonRows(2);
+  try {
+    const { data, error } = await sb.rpc('list_district_accounts');
+    if (error) throw error;
+    const accounts = data || [];
+    if (accounts.length === 0) {
+      listEl.innerHTML = `<p style="font-size:13px; color:var(--text-muted);">No District accounts linked yet.</p>`;
+      return;
+    }
+    listEl.innerHTML = accounts.map(a => `
+      <div class="review-line">
+        <span class="k">${esc(a.email)}<br><span style="font-size:11px; color:var(--text-muted);">${esc(a.district)}</span></span>
+        <span class="v"><button class="btn btn-outline btn-sm" data-unlink-id="${esc(a.user_id)}" data-unlink-email="${esc(a.email)}">Unlink</button></span>
+      </div>
+    `).join('');
+    $all('[data-unlink-id]', listEl).forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm(`Remove District access for ${btn.dataset.unlinkEmail}? Their login stays active, but they'll no longer be able to sign into the District app.`)) return;
+      btn.disabled = true;
+      try {
+        const { error: unlinkError } = await sb.rpc('unlink_district_account', { p_user_id: btn.dataset.unlinkId });
+        if (unlinkError) throw unlinkError;
+        toast('Access removed');
+        renderDistrictAccountsList();
+      } catch (e) {
+        console.error('Failed to unlink account:', e);
+        toast('Could not remove access — check your connection');
+        btn.disabled = false;
+      }
+    }));
+  } catch (e) {
+    console.error('Failed to load district accounts:', e);
+    listEl.innerHTML = `<p style="font-size:13px; color:var(--danger);">Could not load — check your connection.</p>`;
+  }
+}
+$('#btn-link-account').addEventListener('click', async () => {
+  const email = $('#link-account-email').value.trim();
+  const district = $('#link-account-district').value;
+  const errEl = $('#link-account-error');
+  errEl.textContent = '';
+  if (!email) { errEl.textContent = 'Enter the account\u2019s email.'; return; }
+  if (!district) { errEl.textContent = 'Select a district.'; return; }
+  const btn = $('#btn-link-account');
+  btn.disabled = true;
+  btn.textContent = 'Linking…';
+  try {
+    const { error } = await sb.rpc('link_district_account', { p_email: email, p_district: district });
+    if (error) throw error;
+    toast(`${email} linked to ${district}`);
+    $('#link-account-email').value = '';
+    $('#link-account-district').value = '';
+    renderDistrictAccountsList();
+  } catch (e) {
+    console.error('Failed to link account:', e);
+    errEl.textContent = (e && e.message) ? e.message : 'Could not link — check your connection and try again.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Link Account';
+  }
+});
 async function loadDeletedRecords() {
   if (loadDeletedRecords._resetPage !== false) loadDeletedRecords._page = 1;
   loadDeletedRecords._resetPage = true;
@@ -2692,9 +2809,9 @@ $('#btn-export-json').addEventListener('click', async () => {
   try {
     const all = await fetchAllRecords();
     if (all.length === 0) { toast('No records to export yet'); return; }
-    const payload = { exportedAt: new Date().toISOString(), source: 'ENBPA PHQ — Economic & MSME Survey', recordCount: all.length, records: all };
+    const payload = { exportedAt: new Date().toISOString(), source: 'ENBPA Division of Commerce & Industry — Economic & MSME Survey', officialContact: 'Data requests: Division of Commerce & Industry, ENBPA', recordCount: all.length, records: all };
     downloadFile(`enb-msme-export-${todayStr()}.json`, JSON.stringify(payload, null, 2), 'application/json');
-    toast('JSON exported — share this file with HQ');
+    toast('JSON exported');
   } catch (e) {
     console.error('Export failed:', e);
     toast('Could not export — check your connection');
@@ -2841,7 +2958,12 @@ function recordsToCSV(records) {
     const s = (v === undefined || v === null) ? '' : String(v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  return [cols.join(','), ...rows.map(row => row.map(escCsv).join(','))].join('\n');
+  const attribution = [
+    ['ENBPA Division of Commerce & Industry — Economic & MSME Survey'],
+    [`Exported ${todayStr()} — official data requests: Division of Commerce & Industry, ENBPA`],
+    []
+  ];
+  return [...attribution.map(r => r.map(escCsv).join(',')), cols.join(','), ...rows.map(row => row.map(escCsv).join(','))].join('\n');
 }
 
 function downloadFile(filename, content, mime) {
