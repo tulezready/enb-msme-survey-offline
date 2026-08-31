@@ -1433,21 +1433,42 @@ async function renderRecordsSummary() {
   const scopeWard = renderRecordsSummary._ward || null;
   const scopeOfficialWards = scopeLLG ? (WARDS_BY_LLG[scopeLLG] || []) : null;
 
-  let s;
-  try {
-    const { data, error } = await rpcWithRetry('get_summary_stats', {
-      weeks_back: 8, p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard, p_official_wards: scopeOfficialWards
-    });
-    if (error) throw error;
-    s = data;
-  } catch (e) {
-    console.error('Failed to load summary:', e);
+  // Four independent calls instead of one large one - each is individually
+  // faster, and critically, a failure in one no longer takes the whole
+  // screen down. Run together for speed; core is essential (everything
+  // else is built around total/by_status/by_llg), the other three degrade
+  // gracefully - a missing section shows an honest note, not a blank page.
+  const [coreResult, businessResult, developmentResult, cropsResult] = await Promise.allSettled([
+    rpcWithRetry('get_summary_core', { p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard, p_official_wards: scopeOfficialWards }),
+    rpcWithRetry('get_summary_business', { p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard }),
+    rpcWithRetry('get_summary_development', { p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard }),
+    rpcWithRetry('get_summary_crops_trend', { weeks_back: 8, p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard }),
+  ]);
+
+  const coreOk = coreResult.status === 'fulfilled' && !coreResult.value.error;
+  if (!coreOk) {
+    console.error('Failed to load summary core:', coreResult.status === 'rejected' ? coreResult.reason : coreResult.value.error);
     container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load summary after a few attempts — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-summary">Retry</button></div>`;
     const retryBtn = $('#btn-retry-summary');
     if (retryBtn) retryBtn.addEventListener('click', renderRecordsSummary);
     return;
   }
+
+  const failedSections = [];
+  const businessOk = businessResult.status === 'fulfilled' && !businessResult.value.error;
+  const developmentOk = developmentResult.status === 'fulfilled' && !developmentResult.value.error;
+  const cropsOk = cropsResult.status === 'fulfilled' && !cropsResult.value.error;
+  if (!businessOk) { failedSections.push('Business & Employment'); console.error('Failed to load summary business section:', businessResult.status === 'rejected' ? businessResult.reason : businessResult.value.error); }
+  if (!developmentOk) { failedSections.push('Development & Economic'); console.error('Failed to load summary development section:', developmentResult.status === 'rejected' ? developmentResult.reason : developmentResult.value.error); }
+  if (!cropsOk) { failedSections.push('Cash Crops & Trend'); console.error('Failed to load summary crops/trend section:', cropsResult.status === 'rejected' ? cropsResult.reason : cropsResult.value.error); }
+
+  const s = {
+    ...coreResult.value.data,
+    ...(businessOk ? businessResult.value.data : {}),
+    ...(developmentOk ? developmentResult.value.data : {}),
+    ...(cropsOk ? cropsResult.value.data : {}),
+  };
 
   let marketPrices = {};
   try {
@@ -1527,6 +1548,9 @@ async function renderRecordsSummary() {
   </div>`;
 
   let html = printHeader + scopeSelectorHTML + `<div class="warn-box">Summary for ${esc(scopeLabel)} — ${total} record(s), computed live from the server, updates automatically.</div>`;
+  if (failedSections.length > 0) {
+    html += `<div class="warn-box" style="background:var(--accent-light); color:#8A4A05;">⚠ Couldn't load: ${esc(failedSections.join(', '))}. The rest of the summary below is showing correctly — try refreshing to load the missing part(s).</div>`;
+  }
 
   html += marketPricesCardHTML(marketPrices);
 
