@@ -188,17 +188,36 @@ async function restoreRecordRemote(id) {
   const { error } = await sb.from('msme_records').update({ deleted_at: null, deleted_by: null }).eq('id', id);
   if (error) throw error;
 }
+// Supabase silently caps any unpaginated query at 1000 rows - a plain
+// .select() on a table this size would quietly return only the first 1000
+// and look like a complete result. This loops in pages until a
+// less-than-full page confirms the true end has been reached.
+async function fetchAllPaginated(queryBuilder) {
+  const PAGE_SIZE = 1000;
+  let allRows = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await queryBuilder().range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw error;
+    allRows = allRows.concat(data || []);
+    if (!data || data.length < PAGE_SIZE) break; // a partial page means we've reached the real end
+    offset += PAGE_SIZE;
+  }
+  return allRows;
+}
+
 async function fetchAllRecords() {
-  const { data, error } = await sb.from('msme_records').select('data').is('deleted_at', null).order('updated_at', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(row => row.data);
+  const rows = await fetchAllPaginated(() =>
+    sb.from('msme_records').select('data').is('deleted_at', null).order('updated_at', { ascending: false })
+  );
+  return rows.map(row => row.data);
 }
 
 async function fetchRecordsForLLG(district, llg) {
-  const { data, error } = await sb.from('msme_records').select('data').is('deleted_at', null)
-    .eq('district', district).eq('llg', llg).order('updated_at', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(row => row.data);
+  const rows = await fetchAllPaginated(() =>
+    sb.from('msme_records').select('data').is('deleted_at', null).eq('district', district).eq('llg', llg).order('updated_at', { ascending: false })
+  );
+  return rows.map(row => row.data);
 }
 
 function saveDraft(d) {
