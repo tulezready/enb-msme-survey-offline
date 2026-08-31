@@ -81,6 +81,25 @@ const SUPABASE_URL = 'https://lgfdzxcawggxrqvsgzpz.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_cX_rXW51KpL-k9arZupk9w_6MS9Jlo_';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: 'sb-enb-hq-auth' } });
 
+// Wraps an RPC call with automatic retry - a single dropped or slow request
+// shouldn't immediately surface as a hard failure to the person using the
+// app when a short pause and one more attempt might just succeed. Only
+// gives up and returns the error after every attempt has failed.
+async function rpcWithRetry(name, params, maxAttempts = 3) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const { data, error } = await sb.rpc(name, params);
+    if (!error) return { data, error: null };
+    lastError = error;
+    console.warn(`RPC "${name}" failed (attempt ${attempt}/${maxAttempts}):`, error.message || error);
+    if (attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 900)); // 900ms, then 1800ms
+    }
+  }
+  return { data: null, error: lastError };
+}
+
+
 const BUSINESS_ACTIVITIES = {
   general: { label: 'Commerce & Services', items: ['Trade store','Wholesale','Fast food outlet','Second hand clothing shop','Liquor / Bottle shop','Bakery','Service station','PMV / Transport / Taxi services','Pest Control','Professional services (accountancy/consultancy)','Tailoring','Coffin Making','Mechanical Workshop','Contracting services','Communication Towers'] },
   dpi: { label: 'DPI — Agriculture & Livestock', items: ['Cocoa Buying / Cocoa dealer','Livestock / Poultry / Cattle','Fresh produce','Cocoa/coconut nursery'] },
@@ -1416,14 +1435,14 @@ async function renderRecordsSummary() {
 
   let s;
   try {
-    const { data, error } = await sb.rpc('get_summary_stats', {
+    const { data, error } = await rpcWithRetry('get_summary_stats', {
       weeks_back: 8, p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard, p_official_wards: scopeOfficialWards
     });
     if (error) throw error;
     s = data;
   } catch (e) {
     console.error('Failed to load summary:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load summary — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load summary after a few attempts — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-summary">Retry</button></div>`;
     const retryBtn = $('#btn-retry-summary');
     if (retryBtn) retryBtn.addEventListener('click', renderRecordsSummary);
@@ -1432,7 +1451,7 @@ async function renderRecordsSummary() {
 
   let marketPrices = {};
   try {
-    const { data: mpData, error: mpError } = await sb.rpc('get_market_price_summary');
+    const { data: mpData, error: mpError } = await rpcWithRetry('get_market_price_summary', {});
     if (mpError) throw mpError;
     marketPrices = mpData || {};
   } catch (e) {
@@ -1441,7 +1460,7 @@ async function renderRecordsSummary() {
 
   let priceComparison = [];
   try {
-    const { data: pcData, error: pcError } = await sb.rpc('get_price_comparison');
+    const { data: pcData, error: pcError } = await rpcWithRetry('get_price_comparison', {});
     if (pcError) throw pcError;
     priceComparison = pcData || [];
   } catch (e) {
