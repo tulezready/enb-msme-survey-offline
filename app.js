@@ -723,6 +723,9 @@ function recordItemHTML(r) {
   const uploadedLine = r._uploadedAt
     ? `<strong>Uploaded:</strong> ${fmtDateTime(r._uploadedAt)}`
     : `<strong>Uploaded:</strong> —`;
+  const hhBadge = r.location.householdNo
+    ? `<div class="hh-badge">HH ${esc(r.location.householdNo)}</div>`
+    : `<div class="hh-badge missing">No HH#</div>`;
   return `<div class="record-item" data-id="${r.id}">
     <div class="badge ${status}">${esc(initials)}</div>
     <div class="info">
@@ -730,7 +733,10 @@ function recordItemHTML(r) {
       <span>${esc(sub)}</span>
       <span class="record-dates"><strong>Collected:</strong> ${fmtDate(r.location.dateCollected)} &nbsp;&middot;&nbsp; ${uploadedLine}</span>
     </div>
-    <div class="status-tag ${status}">${statusLabel}</div>
+    <div class="right-col">
+      ${hhBadge}
+      <div class="status-tag ${status}">${statusLabel}</div>
+    </div>
   </div>`;
 }
 
