@@ -3191,6 +3191,20 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch((err) => console.error('Service worker registration failed:', err));
   });
+
+  // skipWaiting()/clients.claim() in sw.js make a NEW service worker take
+  // over promptly - but the page already open in the browser keeps running
+  // its OLD JavaScript in memory regardless, until something actually
+  // reloads it. Without this, someone could sit on a stale, already-fixed
+  // bug indefinitely, with every future update silently failing to reach
+  // them the same way. reloaded guards against a reload loop - this must
+  // only ever fire once per page load, not repeatedly.
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    window.location.reload();
+  });
 }
 
 setConnectionStatus(navigator.onLine);
