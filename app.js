@@ -540,7 +540,7 @@ function switchView(view) {
   if (view !== 'wizard') stopAutosaveInterval();
   const twoPane = window.innerWidth >= 900 && view === 'detail';
   document.body.classList.toggle('two-pane', twoPane);
-  ['dashboard', 'records', 'wizard', 'detail', 'transfer', 'dataquality', 'map'].forEach(v => {
+  ['dashboard', 'records', 'wizard', 'detail', 'transfer', 'dataquality', 'map', 'compose'].forEach(v => {
     let shouldHide = (v !== view);
     if (twoPane && v === 'records') shouldHide = false; // keep the list visible alongside the detail panel
     $('#view-' + v).hidden = shouldHide;
@@ -555,6 +555,7 @@ function switchView(view) {
   if (view === 'transfer') renderTransfer();
   if (view === 'dataquality') renderDataQuality();
   if (view === 'map') renderProvinceMap();
+  if (view === 'compose') renderComposeMessage();
   pushNavState();
 }
 
@@ -2681,7 +2682,7 @@ async function renderDataQuality() {
     count: missing.total,
     severity: missing.total > 0 ? 'warn' : 'ok',
     body: missing.total === 0 ? '' : `<p style="font-size:12.5px; color:var(--text-muted); margin-bottom:8px;">These records were saved without ever recording formal, informal, or none — likely an incomplete survey.</p>` +
-      missing.by_llg.map(x => `<div class="review-line clickable" data-flag="missing_business_status" data-llg="${esc(x.llg)}" data-title="Missing Business Status \u2014 ${esc(x.llg)}"><span class="k">${esc(x.llg)}</span><span class="v">${x.count}</span></div>`).join('')
+      missing.by_llg.map(x => `<div class="review-line-wrap"><div class="review-line clickable" data-flag="missing_business_status" data-llg="${esc(x.llg)}" data-title="Missing Business Status \u2014 ${esc(x.llg)}"><span class="k">${esc(x.llg)}</span><span class="v">${x.count}</span></div><span class="clickable remind-link" data-remind-category="missing_status" data-remind-llg="${esc(x.llg)}">Send Reminder</span></div>`).join('')
   });
 
   const neg = r.negative_cash_crop_values || [];
@@ -2716,7 +2717,7 @@ async function renderDataQuality() {
     title: 'Ward Name Not in Official List',
     count: wardMismatches.length,
     severity: wardMismatches.length > 0 ? 'warn' : 'ok',
-    body: wardMismatches.map(x => `<div class="review-line clickable" data-flag="ward_mismatch" data-llg="${esc(x.llg)}" data-ward="${esc(x.ward)}" data-title="Ward Name Not in Official List \u2014 ${esc(x.llg)} \u201c${esc(x.ward)}\u201d"><span class="k">${esc(x.llg)} \u2014 "${esc(x.ward)}"</span><span class="v">${x.count} record(s)</span></div>`).join('')
+    body: wardMismatches.map(x => `<div class="review-line-wrap"><div class="review-line clickable" data-flag="ward_mismatch" data-llg="${esc(x.llg)}" data-ward="${esc(x.ward)}" data-title="Ward Name Not in Official List \u2014 ${esc(x.llg)} \u201c${esc(x.ward)}\u201d"><span class="k">${esc(x.llg)} \u2014 "${esc(x.ward)}"</span><span class="v">${x.count} record(s)</span></div><span class="clickable remind-link" data-remind-category="ward_mismatch" data-remind-llg="${esc(x.llg)}" data-remind-ward="${esc(x.ward)}">Send Reminder</span></div>`).join('')
   });
 
   sections.push({
@@ -2747,7 +2748,7 @@ async function renderDataQuality() {
         const shown = w.missing_numbers.slice(0, 15);
         const extra = w.missing_numbers.length - shown.length;
         const fullList = w.missing_numbers.join(', ');
-        return `<div class="review-line" style="align-items:flex-start;"><span class="k">${esc(w.llg)} \u2014 ${esc(w.ward)} <span style="color:var(--text-muted); font-weight:400;">(${w.record_count}/${w.max_household} collected)</span></span><span class="v hh-missing-list" style="text-align:right; max-width:55%;" data-shown="${esc(shown.join(', '))}" data-full="${esc(fullList)}">${shown.join(', ')}${extra > 0 ? ` <span class="clickable" style="color:var(--primary-dark); text-decoration:underline; font-weight:700;" data-expand-hh="1">+${extra} more</span>` : ''}</span></div>`;
+        return `<div class="review-line-wrap"><div class="review-line" style="align-items:flex-start;"><span class="k">${esc(w.llg)} \u2014 ${esc(w.ward)} <span style="color:var(--text-muted); font-weight:400;">(${w.record_count}/${w.max_household} collected)</span></span><span class="v hh-missing-list" style="text-align:right; max-width:55%;" data-shown="${esc(shown.join(', '))}" data-full="${esc(fullList)}">${shown.join(', ')}${extra > 0 ? ` <span class="clickable" style="color:var(--primary-dark); text-decoration:underline; font-weight:700;" data-expand-hh="1">+${extra} more</span>` : ''}</span></div><span class="clickable remind-link" data-remind-category="missing_household" data-remind-llg="${esc(w.llg)}" data-remind-ward="${esc(w.ward)}" data-remind-numbers="${esc(w.missing_numbers.join(','))}">Send Reminder</span></div>`;
       }).join('')
   });
 
@@ -2784,10 +2785,123 @@ async function renderDataQuality() {
       if (parent) parent.textContent = parent.dataset.full; // one-way reveal - the full list replaces the truncated one, no need to collapse back
     });
   });
+  $all('#dataquality-content [data-remind-category]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      goToCompose({
+        category: el.dataset.remindCategory,
+        llg: el.dataset.remindLlg || null,
+        ward: el.dataset.remindWard || null,
+        numbers: el.dataset.remindNumbers ? el.dataset.remindNumbers.split(',').map(Number) : null,
+      });
+    });
+  });
 }
 $('#btn-open-dataquality').addEventListener('click', () => switchView('dataquality'));
 $('#btn-dataquality-back').addEventListener('click', () => switchView('dashboard'));
+$('#btn-compose-general').addEventListener('click', () => goToCompose());
 $('#btn-open-map').addEventListener('click', () => switchView('map'));
+
+// One template per Data Quality category, each a function so the specific
+// ward/numbers/values can be filled in - never a generic, one-size phrase
+// when the actual detail is already known and sitting right there.
+const MESSAGE_TEMPLATES = {
+  missing_household: (ctx) => `Hi, HQ noticed ${ctx.ward} is missing household number(s) ${(ctx.numbers || []).join(', ')}. Please check if this household was surveyed and add it, or let us know if it doesn't exist.`,
+  missing_status: (ctx) => `Hi, some entries in ${ctx.ward || 'your LLG'} don't have a business status selected. Please go back and choose Formal, Informal, or None for these households.`,
+  negative_crop: (ctx) => `Hi, a cash crop number in ${ctx.ward} was entered as negative (${ctx.detail || ''}). Please check and correct it.`,
+  bracket_mismatch: (ctx) => `Hi, the amount entered in ${ctx.ward} doesn't match the bracket you selected (${ctx.detail || ''}). Please double-check and correct it.`,
+  ward_mismatch: (ctx) => `Hi, we noticed a ward name in your entries that doesn't match our official list: "${ctx.ward}". Please confirm the correct spelling.`,
+  missing_date_village: (ctx) => `Hi, some entries in ${ctx.ward || 'your LLG'} are missing the date collected or village name. Please fill these in when you get a chance.`,
+  general: () => '',
+};
+
+// Opens Compose, optionally pre-filled with a specific category + context
+// (ward, llg, district, and any category-specific detail like the missing
+// numbers themselves). Called with no arguments for a free-form message.
+function goToCompose(opts = {}) {
+  renderComposeMessage._prefill = opts;
+  switchView('compose');
+}
+
+function renderComposeMessage() {
+  const opts = renderComposeMessage._prefill || {};
+  const container = $('#compose-content');
+  const template = MESSAGE_TEMPLATES[opts.category] ? MESSAGE_TEMPLATES[opts.category](opts) : '';
+  const isPrefilled = !!opts.llg || !!opts.district;
+
+  container.innerHTML = `
+    <div class="card">
+      ${isPrefilled ? `
+        <div class="review-line"><span class="k">Sending to</span><span class="v">${esc(opts.llg ? opts.llg : (opts.district ? opts.district + ' District (all LLGs)' : 'Whole Province'))}</span></div>
+      ` : `
+        <div class="field"><label>Send to</label>
+          <select id="compose-district-select">
+            <option value="">Whole Province (all LLGs)</option>
+            ${DISTRICTS.map(d => `<option value="${esc(d)}">${esc(d)} District (all LLGs)</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" id="compose-llg-field" hidden><label>Specific LLG (optional)</label>
+          <select id="compose-llg-select"><option value="">Whole district</option></select>
+        </div>
+      `}
+      <div class="field" style="margin-top:10px;"><label>Message</label>
+        <textarea id="compose-message-text" rows="5" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:14px;">${esc(template)}</textarea>
+      </div>
+      <div class="lock-error" id="compose-error"></div>
+      <button class="btn btn-primary btn-full" id="btn-send-message" style="margin-top:10px;">Send Message</button>
+    </div>
+    <div class="section-title" style="margin-top:20px;">Recently Sent</div>
+    <div class="card" id="compose-sent-log"><p style="font-size:13px; color:var(--text-muted);">Loading…</p></div>
+  `;
+
+  if (!isPrefilled) {
+    const districtSel = $('#compose-district-select');
+    const llgField = $('#compose-llg-field');
+    const llgSel = $('#compose-llg-select');
+    districtSel.addEventListener('change', () => {
+      const d = districtSel.value;
+      llgField.hidden = !d;
+      if (d) llgSel.innerHTML = `<option value="">Whole district</option>` + (LLG_BY_DISTRICT[d] || []).map(l => `<option value="${esc(l)}">${esc(l)}</option>`).join('');
+    });
+  }
+
+  $('#btn-send-message').addEventListener('click', async () => {
+    const text = $('#compose-message-text').value.trim();
+    const errEl = $('#compose-error');
+    errEl.textContent = '';
+    if (!text) { errEl.textContent = 'Enter a message.'; return; }
+    const targetLLG = isPrefilled ? (opts.llg || null) : ($('#compose-llg-select') ? $('#compose-llg-select').value || null : null);
+    const targetDistrict = isPrefilled ? (opts.district || null) : ($('#compose-district-select').value || null);
+    const btn = $('#btn-send-message');
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const { error } = await sb.rpc('send_hq_message', {
+        p_target_llg: targetLLG, p_target_district: targetDistrict,
+        p_category: opts.category || 'general', p_message_text: text
+      });
+      if (error) throw error;
+      toast('Message sent');
+      switchView('dataquality');
+    } catch (e) {
+      console.error('Failed to send message:', e);
+      errEl.textContent = 'Could not send — check your connection and try again.';
+      btn.disabled = false;
+      btn.textContent = 'Send Message';
+    }
+  });
+
+  // Recently sent - lets someone see what's already gone out before sending
+  // another reminder for the same thing.
+  sb.from('hq_messages').select('target_llg, target_district, category, message_text, sent_at').order('sent_at', { ascending: false }).limit(10)
+    .then(({ data, error }) => {
+      const logEl = $('#compose-sent-log');
+      if (error || !data || data.length === 0) { logEl.innerHTML = `<p style="font-size:13px; color:var(--text-muted);">No messages sent yet.</p>`; return; }
+      logEl.innerHTML = data.map(m => `<div class="review-line" style="align-items:flex-start;"><span class="k" style="max-width:35%;">${esc(m.target_llg || (m.target_district ? m.target_district + ' District' : 'Whole Province'))}<br><span style="font-size:10.5px; color:var(--text-muted);">${fmtDateTime(m.sent_at)}</span></span><span class="v" style="text-align:right; max-width:60%; white-space:normal;">${esc(m.message_text)}</span></div>`).join('');
+    });
+}
+$('#btn-compose-back').addEventListener('click', () => switchView('dataquality'));
+
 $('#btn-map-back').addEventListener('click', () => switchView('dashboard'));
 // Real center coordinates for all 23 LLGs. Most sourced individually;
 // several share a coordinate with their officially paired LLG (e.g.
