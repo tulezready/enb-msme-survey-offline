@@ -1140,6 +1140,7 @@ function marketPricesCardHTML(marketPrices) {
       <div class="num">K${d.avg_price}</div>
       <div class="lbl">${esc(c)} — avg/kg (last 30 days)<br>
         <span style="font-weight:400; font-size:11px;">${d.observation_count} observation(s) · latest K${d.latest_price} at ${esc(d.latest_location)}, ${fmtDate(d.latest_date)}</span>
+        ${c === 'Coffee' ? '<br><span style="font-weight:400; font-size:10.5px; color:var(--accent-dark);">\u26a0 National export unit value, not a direct farmgate observation</span>' : ''}
       </div>
     </div>`;
   }).join('');
@@ -1212,6 +1213,7 @@ function priceComparisonCardHTML(priceComparison, marketPrices, cashCrops) {
         <div class="stat-card" style="padding:10px; border-color:${ratioColor};"><div class="num" style="font-size:18px; color:${ratioColor};">${p.ratio_pct != null ? p.ratio_pct + '%' : '—'}</div><div class="lbl" style="font-size:10.5px;">Local as % of intl.</div></div>
       </div>
       ${p.intl_price_usd_unit != null ? `<p style="font-size:11px; color:var(--text-muted); margin:8px 0 0;">International: $${p.intl_price_usd_unit}/${u === 'm3' ? 'm\u00b3' : 'tonne'}${p.exchange_rate ? ` · converted at $1 = K${p.exchange_rate}${p.exchange_rate_date ? ' (' + fmtDate(p.exchange_rate_date) + ')' : ''}` : ' · no exchange rate on file yet'}</p>` : ''}
+      ${c === 'Coffee' && p.local_price_pgk_unit != null ? `<p style="font-size:11px; color:var(--accent-dark); margin:6px 0 0;">\u26a0 Local figure is PNG's national export unit value (UN Comtrade), not a direct farmgate observation like the other crops \u2014 likely somewhat above what an individual farmer actually receives.</p>` : ''}
     </div>`;
   }).join('');
 
@@ -1359,10 +1361,12 @@ function stackedBarBlockHTML(title, rowsData, colorKeyField, groupByField, subti
       lastGroup = d[groupByField];
       rows += `<div class="chart-group-header">${districtDotHTML(lastGroup)}${esc(lastGroup)}</div>`;
     }
-    const total = d.formal + d.informal + d.none;
+    const unknown = d.unknown || 0;
+    const total = d.formal + d.informal + d.none + unknown;
     const fPct = total ? Math.round(d.formal / total * 100) : 0;
     const iPct = total ? Math.round(d.informal / total * 100) : 0;
-    const nPct = total ? Math.max(0, 100 - fPct - iPct) : 0;
+    const uPct = total ? Math.round(unknown / total * 100) : 0;
+    const nPct = total ? Math.max(0, 100 - fPct - iPct - uPct) : 0;
     const colorKey = colorKeyField ? d[colorKeyField] : d.label;
     rows += `<div class="chart-row${groupByField ? ' chart-row-grouped' : ''}">
       <div class="chart-label">${groupByField ? '' : districtDotHTML(colorKey)}${esc(d.label)}</div>
@@ -1370,6 +1374,7 @@ function stackedBarBlockHTML(title, rowsData, colorKeyField, groupByField, subti
         <div class="stacked-seg formal" style="width:${fPct}%"></div>
         <div class="stacked-seg informal" style="width:${iPct}%"></div>
         <div class="stacked-seg none" style="width:${nPct}%"></div>
+        ${unknown ? `<div class="stacked-seg" style="width:${uPct}%; background:var(--border);"></div>` : ''}
       </div>
       <div class="stacked-total-badge">${total}</div>
     </div>`;
@@ -1378,7 +1383,7 @@ function stackedBarBlockHTML(title, rowsData, colorKeyField, groupByField, subti
     <span><i class="dot formal"></i>Formal</span>
     <span><i class="dot informal"></i>Informal</span>
     <span><i class="dot none"></i>No business</span>
-
+    ${rowsData.some(d => d.unknown) ? `<span><i class="dot" style="background:var(--border);"></i>Status not recorded</span>` : ''}
   </div>`;
   const subtitleHTML = subtitle ? `<p style="font-size:12px; color:var(--text-muted); margin:-6px 0 12px;">${esc(subtitle)}</p>` : '';
   return `<div class="review-block card"><h4>${esc(title)}</h4>${subtitleHTML}${rows}${legend}</div>`;
@@ -1501,10 +1506,10 @@ async function renderRecordsSummary() {
     return;
   }
 
-  const byStatus = s.by_status || { formal: 0, informal: 0, none: 0 };
+  const byStatus = s.by_status || { formal: 0, informal: 0, none: 0, unknown: 0 };
   const byDistrictStatus = {};
-  DISTRICTS.forEach(d => byDistrictStatus[d] = { formal: 0, informal: 0, none: 0 });
-  (s.by_district || []).forEach(row => { if (byDistrictStatus[row.label]) byDistrictStatus[row.label] = { formal: row.formal, informal: row.informal, none: row.none }; });
+  DISTRICTS.forEach(d => byDistrictStatus[d] = { formal: 0, informal: 0, none: 0, unknown: 0 });
+  (s.by_district || []).forEach(row => { if (byDistrictStatus[row.label]) byDistrictStatus[row.label] = { formal: row.formal, informal: row.informal, none: row.none, unknown: row.unknown || 0 }; });
 
   const employment = s.employment || { total_formally_employed: 0, employed_listed: 0, unemployed_listed: 0 };
   const topActivities = (s.top_activities || []).map(a => [a.label, a.count]);
@@ -1566,11 +1571,13 @@ async function renderRecordsSummary() {
     <div class="stat-card accent"><div class="num" data-countup="${byStatus.formal}">0</div><div class="lbl">Formal business</div></div>
     <div class="stat-card"><div class="num" data-countup="${byStatus.informal}">0</div><div class="lbl">Informal sector</div></div>
     <div class="stat-card"><div class="num" data-countup="${byStatus.none}">0</div><div class="lbl">No business</div></div>
+    ${byStatus.unknown ? `<div class="stat-card"><div class="num" data-countup="${byStatus.unknown}">0</div><div class="lbl">Status not recorded</div></div>` : ''}
   </div>`;
   html += donutChartHTML('Business Status Split', [
     { label: 'Formal', value: byStatus.formal, color: 'var(--primary)' },
     { label: 'Informal', value: byStatus.informal, color: 'var(--accent)' },
-    { label: 'No business', value: byStatus.none, color: 'var(--chart-neutral)' }
+    { label: 'No business', value: byStatus.none, color: 'var(--chart-neutral)' },
+    ...(byStatus.unknown ? [{ label: 'Status not recorded', value: byStatus.unknown, color: 'var(--border)' }] : []),
   ]);
   html += trendChartHTML('Surveys Collected — Last 8 Weeks', s.weekly_trend || []);
 
@@ -1581,14 +1588,14 @@ async function renderRecordsSummary() {
     const byWardRows = s.by_ward || [];
     if (byWardRows.length) {
       html += stackedBarBlockHTML('By Ward (composition)', byWardRows.map(row => ({
-        label: row.label, formal: row.formal, informal: row.informal, none: row.none
+        label: row.label, formal: row.formal, informal: row.informal, none: row.none, unknown: row.unknown || 0
       })));
     }
   } else if (scopeDistrict) {
     const byLLGRows = s.by_llg || [];
     if (byLLGRows.length) {
       html += stackedBarBlockHTML('By LLG (composition)', byLLGRows.map(row => ({
-        label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none
+        label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none, unknown: row.unknown || 0
       })), 'district');
     }
   } else {
@@ -1597,7 +1604,7 @@ async function renderRecordsSummary() {
     const coverage = s.llg_coverage || { total_llgs: 23, reporting: 0 };
     if (byLLGRows.length) {
       html += stackedBarBlockHTML('By LLG (composition)', byLLGRows.map(row => ({
-        label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none
+        label: row.label, district: row.district, formal: row.formal, informal: row.informal, none: row.none, unknown: row.unknown || 0
       })), 'district', 'district', `${coverage.reporting} of ${coverage.total_llgs} LLGs reporting`);
     }
   }
