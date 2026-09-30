@@ -16,6 +16,13 @@ const DISTRICT_COLORS = {
   'Pomio': '#8058B5',
   'Rabaul': '#C74F45'
 };
+/* UI v2: one consistent SVG icon set (Lucide, ISC licence) instead of emoji. */
+const SVG_ICONS = {"house": "<path d=\"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8\" /> <path d=\"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\" />", "folder-open": "<path d=\"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2\" />", "arrow-left-right": "<path d=\"M8 3 4 7l4 4\" /> <path d=\"M4 7h16\" /> <path d=\"m16 21 4-4-4-4\" /> <path d=\"M20 17H4\" />", "map": "<path d=\"M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z\" /> <path d=\"M15 5.764v15\" /> <path d=\"M9 3.236v15\" />", "search": "<path d=\"m21 21-4.34-4.34\" /> <circle cx=\"11\" cy=\"11\" r=\"8\" />", "list": "<path d=\"M3 5h.01\" /> <path d=\"M3 12h.01\" /> <path d=\"M3 19h.01\" /> <path d=\"M8 5h13\" /> <path d=\"M8 12h13\" /> <path d=\"M8 19h13\" />", "chart-column": "<path d=\"M3 3v16a2 2 0 0 0 2 2h16\" /> <path d=\"M18 17V9\" /> <path d=\"M13 17V5\" /> <path d=\"M8 17v-3\" />", "circle-dollar-sign": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <path d=\"M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8\" /> <path d=\"M12 18V6\" />", "upload": "<path d=\"M12 3v12\" /> <path d=\"m17 8-5-5-5 5\" /> <path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\" />", "download": "<path d=\"M12 15V3\" /> <path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\" /> <path d=\"m7 10 5 5 5-5\" />", "circle-check": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <path d=\"m16 9-5.5 5.5L8 12\" />", "triangle-alert": "<path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\" /> <path d=\"M12 9v4\" /> <path d=\"M12 17h.01\" />", "pencil": "<path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z\" /> <path d=\"m15 5 4 4\" />", "x": "<path d=\"M18 6 6 18\" /> <path d=\"m6 6 12 12\" />", "clock": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <path d=\"M12 6v6l4 2\" />", "chevron-right": "<path d=\"m9 18 6-6-6-6\" />", "save": "<path d=\"M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z\" /> <path d=\"M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7\" /> <path d=\"M7 3v4a1 1 0 0 0 1 1h7\" />", "mail": "<path d=\"m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7\" /> <rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"2\" />", "refresh-cw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\" /> <path d=\"M21 3v5h-5\" /> <path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\" /> <path d=\"M8 16H3v5\" />", "shuffle": "<path d=\"m18 14 4 4-4 4\" /> <path d=\"m18 2 4 4-4 4\" /> <path d=\"M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22\" /> <path d=\"M2 6h1.972a4 4 0 0 1 3.6 2.2\" /> <path d=\"M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45\" />", "inbox": "<polyline points=\"22 12 16 12 14 15 10 15 8 12 2 12\" /> <path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\" />", "plus": "<path d=\"M5 12h14\" /> <path d=\"M12 5v14\" />"};
+function svgIcon(name, cls = '') {
+  return `<svg class="ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${SVG_ICONS[name] || ''}</svg>`;
+}
+const fmtNum = (n) => (Number(n) || 0).toLocaleString('en-US');
+
 function districtDotHTML(district) {
   const color = DISTRICT_COLORS[district] || '#9C948A';
   return `<span class="district-dot" style="background:${color}"></span>`;
@@ -373,6 +380,8 @@ const BG_SLIDESHOW_QUERIES = [
   'tropical island aerial', 'rainforest waterfall'
 ];
 function startBackgroundSlideshow() {
+  return; // UI v2: off - it downloaded a 1600x900 stock photo every few seconds on mobile data
+
   const layerA = document.getElementById('bg-layer-a');
   const layerB = document.getElementById('bg-layer-b');
   if (!layerA || !layerB) return;
@@ -409,15 +418,15 @@ startBackgroundSlideshow();
 function animateCountUp(el, target, duration = 700) {
   if (!el) return;
   const value = Number(target) || 0;
-  if (PREFERS_REDUCED_MOTION || value === 0) { el.textContent = value; return; }
+  if (PREFERS_REDUCED_MOTION || value === 0) { el.textContent = fmtNum(value); return; }
   const start = performance.now();
   function tick(now) {
     if (!document.body.contains(el)) return; // element was re-rendered away - stop quietly
     const elapsed = Math.min(1, (now - start) / duration);
     const eased = 1 - Math.pow(1 - elapsed, 3); // ease-out cubic
-    el.textContent = Math.round(eased * value);
+    el.textContent = fmtNum(Math.round(eased * value));
     if (elapsed < 1) requestAnimationFrame(tick);
-    else el.textContent = value;
+    else el.textContent = fmtNum(value);
   }
   requestAnimationFrame(tick);
 }
@@ -644,7 +653,7 @@ async function renderDashboard() {
     return;
   }
 
-  $('#record-count-pill').textContent = stats.total;
+  $('#record-count-pill').textContent = fmtNum(stats.total);
   animateCountUp($('#stat-total'), stats.total);
   animateCountUp($('#stat-week'), stats.this_week);
   animateCountUp($('#stat-formal'), stats.formal);
@@ -676,7 +685,7 @@ async function renderDashboard() {
         staleCard.hidden = false;
         staleCard.innerHTML = `
           <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-            <span style="font-size:18px;">⏱️</span>
+            <span style="display:inline-flex; color:var(--accent-dark);">${svgIcon('clock')}</span>
             <strong style="font-size:14px;">${stale.length} LLG(s) haven't reported in a while</strong>
           </div>
           ${stale.slice(0, 6).map(s => `
@@ -698,7 +707,7 @@ async function renderDashboard() {
   }
 
   dEl.innerHTML = DISTRICTS.map(d => `
-    <div class="review-line clickable" data-district="${esc(d)}"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${(stats.by_district && stats.by_district[d]) || 0}</span></div>
+    <div class="review-line clickable" data-district="${esc(d)}"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${fmtNum((stats.by_district && stats.by_district[d]) || 0)}</span></div>
   `).join('');
   $all('#district-breakdown .review-line').forEach(el => {
     el.addEventListener('click', () => goToDistrictLLGs(el.dataset.district));
@@ -706,7 +715,7 @@ async function renderDashboard() {
 
   const recent = stats.recent || [];
   if (recent.length === 0) {
-    rEl.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No records yet.<br>They'll appear here once enumerators upload from the field.</p></div>`;
+    rEl.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('folder-open')}</div><p>No records yet.<br>They'll appear here once enumerators upload from the field.</p></div>`;
   } else {
     rEl.innerHTML = recent.map(recordItemHTML).join('');
     $all('#recent-list .record-item').forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
@@ -778,14 +787,14 @@ async function renderFlaggedRecords() {
     if (error) throw error;
     const list = (data || []).map(row => ({ ...row.data, _uploadedAt: row.created_at }));
     if (list.length === 0) {
-      container.innerHTML = `<div class="empty-state"><div class="icon">✅</div><p>No records currently match this — it may have already been corrected.</p></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('circle-check', 'ok')}</div><p>No records currently match this — it may have already been corrected.</p></div>`;
     } else {
       container.innerHTML = list.map(recordItemHTML).join('');
       $all('.record-item', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
     }
   } catch (e) {
     console.error('Failed to load flagged records:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-flagged">Retry</button></div>`;
     const retryBtn = $('#btn-retry-flagged');
     if (retryBtn) retryBtn.addEventListener('click', renderFlaggedRecords);
@@ -806,7 +815,7 @@ async function renderMissingStatusBatch() {
     if (error) throw error;
     const records = data || [];
     if (records.length === 0) {
-      container.innerHTML = `<div class="empty-state"><div class="icon">✅</div><p>No records currently match this — it may have already been corrected.</p></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('circle-check', 'ok')}</div><p>No records currently match this — it may have already been corrected.</p></div>`;
       return;
     }
     const suggested = records.filter(r => r.suggested_status);
@@ -860,7 +869,7 @@ async function renderMissingStatusBatch() {
     $all('.review-line.clickable[data-id]', container).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.id)));
   } catch (e) {
     console.error('Failed to load missing-status records with evidence:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-flagged">Retry</button></div>`;
     const retryBtn = $('#btn-retry-flagged');
     if (retryBtn) retryBtn.addEventListener('click', renderMissingStatusBatch);
@@ -960,7 +969,7 @@ async function renderDistrictLevel() {
     $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('llgs', el.dataset.value, null)));
   } catch (e) {
     console.error('Failed to load district overview:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
     const retryBtn = $('#btn-retry-records');
     if (retryBtn) retryBtn.addEventListener('click', renderRecordsList);
@@ -980,7 +989,7 @@ async function renderLLGLevel() {
     $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('wards', recordsDrillDistrict, el.dataset.value)));
   } catch (e) {
     console.error('Failed to load LLG overview:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
     const retryBtn = $('#btn-retry-records');
     if (retryBtn) retryBtn.addEventListener('click', renderRecordsList);
@@ -1003,7 +1012,7 @@ async function renderWardLevel() {
     }));
   } catch (e) {
     console.error('Failed to load ward overview:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
     const retryBtn = $('#btn-retry-records');
     if (retryBtn) retryBtn.addEventListener('click', renderRecordsList);
@@ -1048,7 +1057,7 @@ async function renderRecordsAtWard() {
     const list = (data || []).map(row => ({ ...row.data, _uploadedAt: row.created_at }));
 
     if (list.length === 0) {
-      container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No records found.</p></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('search')}</div><p>No records found.</p></div>`;
     } else {
       let html = list.map(recordItemHTML).join('');
       if (list.length < count) {
@@ -1065,7 +1074,7 @@ async function renderRecordsAtWard() {
     }
   } catch (e) {
     console.error('Failed to load records:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load records — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load records — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
     const retryBtn = $('#btn-retry-records');
     if (retryBtn) retryBtn.addEventListener('click', () => { renderRecordsList._resetPage = false; renderRecordsList(); });
@@ -1093,7 +1102,7 @@ async function renderFlatSearch(q) {
     const list = (data || []).map(row => ({ ...row.data, _uploadedAt: row.created_at }));
 
     if (list.length === 0) {
-      container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching records.</p></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('search')}</div><p>No matching records.</p></div>`;
     } else {
       let html = list.map(recordItemHTML).join('');
       if (list.length < count) {
@@ -1110,7 +1119,7 @@ async function renderFlatSearch(q) {
     }
   } catch (e) {
     console.error('Failed to load search results:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-records">Retry</button></div>`;
     const retryBtn = $('#btn-retry-records');
     if (retryBtn) retryBtn.addEventListener('click', () => { renderRecordsList._resetPage = false; renderRecordsList(); });
@@ -1150,9 +1159,9 @@ function marketPricesCardHTML(marketPrices) {
       return `<div class="stat-card"><div class="num">—</div><div class="lbl">${esc(c)}<br><span style="font-weight:400; font-size:11px;">No observations yet</span></div></div>`;
     }
     return `<div class="stat-card">
-      <div class="num">K${d.avg_price}</div>
+      <div class="num">K${Number(d.avg_price).toFixed(2)}</div>
       <div class="lbl">${esc(c)} — avg/kg (last 30 days)<br>
-        <span style="font-weight:400; font-size:11px;">${d.observation_count} observation(s) · latest K${d.latest_price} at ${esc(d.latest_location)}, ${fmtDate(d.latest_date)}</span>
+        <span style="font-weight:400; font-size:11px;">${d.observation_count} observation(s) · latest K${Number(d.latest_price).toFixed(2)} at ${esc(d.latest_location)}, ${fmtDate(d.latest_date)}</span>
         ${c === 'Coffee' ? '<br><span style="font-weight:400; font-size:10.5px; color:var(--accent-dark);">\u26a0 National export unit value, not a direct farmgate observation</span>' : ''}
       </div>
     </div>`;
@@ -1354,7 +1363,7 @@ function donutChartHTML(title, segments) {
   }).join(', ');
   const legend = segments.map(seg => {
     const pct = Math.round((Number(seg.value) || 0) / total * 100);
-    return `<div class="donut-legend-row"><span class="donut-swatch" style="background:${seg.color}"></span>${esc(seg.label)} — ${seg.value} (${pct}%)</div>`;
+    return `<div class="donut-legend-row"><span class="donut-swatch" style="background:${seg.color}"></span>${esc(seg.label)} — ${fmtNum(seg.value)} (${pct}%)</div>`;
   }).join('');
   return `<div class="review-block card"><h4>${esc(title)}</h4>
     <div class="donut-wrap">
@@ -1473,7 +1482,7 @@ async function renderRecordsSummary() {
   const coreOk = coreResult.status === 'fulfilled' && !coreResult.value.error;
   if (!coreOk) {
     console.error('Failed to load summary core:', coreResult.status === 'rejected' ? coreResult.reason : coreResult.value.error);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load summary after a few attempts — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load summary after a few attempts — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-summary">Retry</button></div>`;
     const retryBtn = $('#btn-retry-summary');
     if (retryBtn) retryBtn.addEventListener('click', renderRecordsSummary);
@@ -1497,7 +1506,7 @@ async function renderRecordsSummary() {
 
   const total = s.total || 0;
   if (total === 0) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No records yet.<br>The summary fills in once records are collected or imported.</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('chart-column')}</div><p>No records yet.<br>The summary fills in once records are collected or imported.</p></div>`;
     return;
   }
 
@@ -1554,9 +1563,9 @@ async function renderRecordsSummary() {
     </div>` : ''}
   </div>`;
 
-  let html = printHeader + scopeSelectorHTML + `<div class="warn-box">Summary for ${esc(scopeLabel)} — ${total} record(s), computed live from the server, updates automatically.</div>`;
+  let html = printHeader + scopeSelectorHTML + `<div class="warn-box">Summary for ${esc(scopeLabel)} — ${fmtNum(total)} record(s), computed live from the server, updates automatically.</div>`;
   if (failedSections.length > 0) {
-    html += `<div class="warn-box" style="background:var(--accent-light); color:#8A4A05;">⚠ Couldn't load: ${esc(failedSections.join(', '))}. The rest of the summary below is showing correctly — try refreshing to load the missing part(s).</div>`;
+    html += `<div class="warn-box" style="background:var(--accent-light); color:#8A4A05;">${svgIcon('triangle-alert')} Couldn't load: ${esc(failedSections.join(', '))}. The rest of the summary below is showing correctly — try refreshing to load the missing part(s).</div>`;
   }
 
   html += `<div class="stat-grid" id="summary-status-anchor">
@@ -1698,7 +1707,7 @@ async function renderMarketPricesTab() {
   if (!cropsOk) console.error('Failed to load crop totals for estimated values (non-fatal):', cropsResult.status === 'rejected' ? cropsResult.reason : cropsResult.value.error);
 
   if (!marketOk && !comparisonOk) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load market prices after a few attempts — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load market prices after a few attempts — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-prices">Retry</button></div>`;
     const retryBtn = $('#btn-retry-prices');
     if (retryBtn) retryBtn.addEventListener('click', renderMarketPricesTab);
@@ -1739,7 +1748,7 @@ async function renderMarketPricesTab() {
   html += `<div class="warn-box">Estimated values for ${esc(scopeLabel)}. Prices are province-wide market observations.</div>`;
   if (!marketOk || !comparisonOk) {
     const missing = [!marketOk && 'Local Market Prices', !comparisonOk && 'Local vs. International Prices'].filter(Boolean).join(', ');
-    html += `<div class="warn-box" style="background:var(--accent-light); color:#8A4A05;">⚠ Couldn't load: ${esc(missing)}. The rest below is showing correctly — try refreshing to load the missing part.</div>`;
+    html += `<div class="warn-box" style="background:var(--accent-light); color:#8A4A05;">${svgIcon('triangle-alert')} Couldn't load: ${esc(missing)}. The rest below is showing correctly — try refreshing to load the missing part.</div>`;
   }
   html += marketPricesCardHTML(marketPrices);
   html += priceComparisonCardHTML(priceComparison, marketPrices, cashCrops);
@@ -1965,7 +1974,7 @@ async function openDetail(id) {
     hasLeftoverEconomic = Object.values(e).some(v => v !== '' && v != null);
     if (hasLeftoverEconomic) {
       sections += `<div class="review-block" style="border:1.5px solid var(--danger); border-radius:8px; padding:12px; margin-bottom:16px; background:var(--danger-light);">
-        <h4 style="color:var(--danger); border-bottom-color:var(--danger);">⚠ Leftover Economic Data</h4>
+        <h4 style="color:var(--danger); border-bottom-color:var(--danger);">${svgIcon('triangle-alert')} Leftover Economic Data</h4>
         <p style="font-size:12.5px; margin-bottom:8px;">This record's status is "${esc(statusLabel)}", but it still carries Economic Output data from before — almost certainly left over from switching status after this section was filled in. It has no legitimate place on a ${esc(statusLabel.toLowerCase())} record.</p>
         ${[
           ['Turnover bracket', e.turnoverBracket], ['Turnover amount (K)', e.turnoverAmount],
@@ -1994,7 +2003,7 @@ async function openDetail(id) {
         <span style="font-size:12.5px; color:var(--text-muted);">${esc([r.location.village, r.business.name].filter(Boolean).join(' · '))} · Collected ${fmtDate(r.location.dateCollected)}</span>
       </div>
     </div>
-    ${r.source === 'hq_manual' ? `<div class="warn-box" style="font-size:12px;">✎ Entered manually via PHQ — not from a field paper form.</div>` : ''}
+    ${r.source === 'hq_manual' ? `<div class="warn-box" style="font-size:12px;">${svgIcon('pencil')} Entered manually via PHQ — not from a field paper form.</div>` : ''}
     <div class="card">
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary" id="btn-detail-edit" style="flex:1;">Edit</button>
@@ -2292,7 +2301,7 @@ function renderStepB(el) {
 function renderRepeatTable(container, arr, fields, labels, onChange) {
   container.innerHTML = arr.map((row, idx) => `
     <div class="repeat-row" data-idx="${idx}">
-      <button type="button" class="rm-row" data-rm="${idx}">✕</button>
+      <button type="button" class="rm-row" data-rm="${idx}" aria-label="Remove this row">${svgIcon('x')}</button>
       <div class="field-row">
         ${fields.map((f, i) => `<div class="field" style="margin-bottom:8px;"><label>${esc(labels[i])}</label><input type="text" data-f="${f}" value="${esc(row[f] || '')}"></div>`).join('')}
       </div>
@@ -2797,7 +2806,7 @@ async function renderDQDistricts() {
     });
   } catch (e) {
     console.error('Failed to load Data Quality district summary:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-dq">Retry</button></div>`;
     const retryBtn = $('#btn-retry-dq');
     if (retryBtn) retryBtn.addEventListener('click', renderDataQuality);
@@ -2829,7 +2838,7 @@ async function renderDQLLGs() {
     let html = `<div class="review-line clickable" data-back="districts" style="font-size:13px; font-weight:700; color:var(--primary-dark); padding:6px 0;">‹ Back to Districts</div>`;
     html += `<h3 style="margin:8px 0 10px;">${esc(dqDrillDistrict)}</h3>`;
     if (rows.length === 0) {
-      html += `<div class="empty-state"><div class="icon">✅</div><p>No data quality issues in this district.</p></div>`;
+      html += `<div class="empty-state"><div class="icon">${svgIcon('circle-check', 'ok')}</div><p>No data quality issues in this district.</p></div>`;
     } else {
       html += rows.map(r => `<div class="review-line clickable card" data-llg="${esc(r.llg)}" style="align-items:flex-start;"><span class="k">${esc(r.llg)}${dqBadges(r)}</span><span class="v" style="font-family:var(--font-mono); font-weight:700; color:${r.total > 0 ? 'var(--accent-dark)' : 'var(--primary)'};">${r.total}</span></div>`).join('');
     }
@@ -2840,7 +2849,7 @@ async function renderDQLLGs() {
     });
   } catch (e) {
     console.error('Failed to load Data Quality LLG summary:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-dq">Retry</button></div>`;
     const retryBtn = $('#btn-retry-dq');
     if (retryBtn) retryBtn.addEventListener('click', renderDataQuality);
@@ -2862,11 +2871,11 @@ async function renderDQWards() {
     let html = `<div class="review-line clickable" data-back="llgs" style="font-size:13px; font-weight:700; color:var(--primary-dark); padding:6px 0;">‹ Back to ${esc(dqDrillDistrict)}</div>`;
     html += `<h3 style="margin:8px 0 10px;">${esc(dqDrillLLG)}</h3>`;
     if (rows.length === 0) {
-      html += `<div class="empty-state"><div class="icon">✅</div><p>No data quality issues in this LLG.</p></div>`;
+      html += `<div class="empty-state"><div class="icon">${svgIcon('circle-check', 'ok')}</div><p>No data quality issues in this LLG.</p></div>`;
     } else {
       html += rows.map(r => {
         const isUnofficial = officialWards.length > 0 && !officialWards.includes(r.ward);
-        return `<div class="review-line clickable card" data-ward="${esc(r.ward)}" style="align-items:flex-start;"><span class="k">${esc(r.ward)}${isUnofficial ? ' <span style="color:var(--danger); font-size:11px; font-weight:700;">⚠ not on official list</span>' : ''}${dqBadges(r)}</span><span class="v" style="font-family:var(--font-mono); font-weight:700; color:${r.total > 0 ? 'var(--accent-dark)' : 'var(--primary)'};">${r.total}</span></div>`;
+        return `<div class="review-line clickable card" data-ward="${esc(r.ward)}" style="align-items:flex-start;"><span class="k">${esc(r.ward)}${isUnofficial ? ' <span style="color:var(--danger); font-size:11px; font-weight:700;">' + svgIcon('triangle-alert') + ' not on official list</span>' : ''}${dqBadges(r)}</span><span class="v" style="font-family:var(--font-mono); font-weight:700; color:${r.total > 0 ? 'var(--accent-dark)' : 'var(--primary)'};">${r.total}</span></div>`;
       }).join('');
     }
     container.innerHTML = html;
@@ -2876,7 +2885,7 @@ async function renderDQWards() {
     });
   } catch (e) {
     console.error('Failed to load Data Quality ward summary:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-dq">Retry</button></div>`;
     const retryBtn = $('#btn-retry-dq');
     if (retryBtn) retryBtn.addEventListener('click', renderDataQuality);
@@ -2969,7 +2978,7 @@ async function renderDQWardDetail() {
 
     const totalHere = (d.missing_status || 0) + (d.negative_cash_crops || []).length + (d.turnover_mismatches || []).length + (d.expenses_mismatches || []).length + (d.missing_date || 0) + (d.missing_village || 0) + (d.missing_household_numbers || []).length;
     if (totalHere === 0 && !isUnofficial) {
-      html += `<div class="empty-state"><div class="icon">✅</div><p>No data quality issues for this ward.</p></div>`;
+      html += `<div class="empty-state"><div class="icon">${svgIcon('circle-check', 'ok')}</div><p>No data quality issues for this ward.</p></div>`;
     }
 
     container.innerHTML = html;
@@ -3008,7 +3017,7 @@ async function renderDQWardDetail() {
     });
   } catch (e) {
     console.error('Failed to load Data Quality ward detail:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-dq">Retry</button></div>`;
     const retryBtn = $('#btn-retry-dq');
     if (retryBtn) retryBtn.addEventListener('click', renderDataQuality);
@@ -3177,7 +3186,7 @@ async function renderProvinceMap() {
     mapData = data || [];
   } catch (e) {
     console.error('Failed to load map data:', e);
-    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load — check your connection.</p>
+    container.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load — check your connection.</p>
       <button class="btn btn-outline" id="btn-retry-map">Retry</button></div>`;
     const retryBtn = $('#btn-retry-map');
     if (retryBtn) retryBtn.addEventListener('click', renderProvinceMap);
@@ -3470,12 +3479,12 @@ function setConnectionStatus(online) {
   const card = $('#offline-readiness-card');
   if (!icon) return;
   if (online) {
-    icon.textContent = '✅';
+    icon.innerHTML = svgIcon('circle-check', 'ok');
     title.textContent = 'Connected';
     desc.textContent = 'Signed-in access to the shared database is working normally.';
     card.style.borderColor = 'var(--success)';
   } else {
-    icon.textContent = '⚠️';
+    icon.innerHTML = svgIcon('triangle-alert', 'bad');
     title.textContent = 'No connection';
     desc.textContent = "This app needs internet to sign in and to load or save records — reconnect and try again.";
     card.style.borderColor = 'var(--danger)';

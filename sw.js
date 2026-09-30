@@ -1,4 +1,4 @@
-const CACHE_NAME = 'msme-survey-hq-v81';
+const CACHE_NAME = 'msme-survey-hq-v82';
 const APP_SHELL = [
   './index.html',
   './app.js',
@@ -7,7 +7,9 @@ const APP_SHELL = [
   './icon-512.png',
   './icon-maskable-192.png',
   './icon-maskable-512.png',
-  './logo.svg'
+  './logo.svg',
+  './fonts/lexend-latin-wght-normal.woff2',
+  './fonts/source-sans-3-latin-wght-normal.woff2'
 ];
 
 self.addEventListener('install', (event) => {

@@ -10,33 +10,37 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <style>
+@font-face{font-family:'Lexend Variable'; font-style:normal; font-weight:100 900; font-display:swap; src:url('fonts/lexend-latin-wght-normal.woff2') format('woff2-variations');}
+@font-face{font-family:'Source Sans 3 Variable'; font-style:normal; font-weight:200 900; font-display:swap; src:url('fonts/source-sans-3-latin-wght-normal.woff2') format('woff2-variations');}
 :root{
-  --bg:#0E1613;
-  --surface:#182420;
-  --surface-2:#20302A;
-  --primary:#22855C;
-  --primary-mid:#2FA876;
-  --primary-dark:#5FD6A0;
-  --primary-deepest:#0A1F17;
-  --primary-light:#1C3A2E;
-  --primary-glow:#2FA87625;
-  --accent:#E6A23C;
-  --accent-dark:#F0C674;
-  --accent-light:#3A2712;
-  --chart-neutral:#7A7268;
-  --text:#EDE6DC;
-  --text-muted:#9C948A;
-  --border:#2E4038;
-  --danger:#E5534B;
-  --danger-light:#3D1E1B;
-  --success:#3E9169;
-  --success-light:#1A2E24;
-  --font-display: Georgia, 'Times New Roman', serif;
-  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  /* UI v2 - light, high-contrast. Ash white, ENB green, cocoa, seal red. */
+  --bg:#F5F7F6;
+  --surface:#FFFFFF;
+  --surface-2:#EDF1EF;
+  --primary:#1D5C47;
+  --primary-mid:#257259;
+  --primary-dark:#123C2F;
+  --primary-deepest:#0E2E24;
+  --primary-light:#E4EFEA;
+  --primary-glow:#1D5C4722;
+  --accent:#B45309;
+  --accent-dark:#8A3F0A;
+  --accent-light:#FBEFE2;
+  --chart-neutral:#B4BDB8;
+  --text:#16211D;
+  --text-muted:#55635D;
+  --border:#D9E0DC;
+  --danger:#B3261E;
+  --danger-light:#FBEAE8;
+  --success:#1F7A4D;
+  --success-light:#E3F2EA;
+  --font-display: 'Lexend Variable', 'Lexend', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-body: 'Source Sans 3 Variable', 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Consolas, monospace;
-  --radius: 10px;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.35);
-  --shadow-md: 0 4px 14px rgba(0,0,0,0.45);
+  --radius: 12px;
+  --shadow-sm: 0 1px 2px rgba(22,33,29,.06), 0 1px 1px rgba(22,33,29,.03);
+  --shadow-md: 0 8px 24px rgba(22,33,29,.10);
+  --focus: #1D5C47;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 *{box-sizing:border-box;}
@@ -528,6 +532,67 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   body.two-pane #view-detail #detail-body{ max-width:780px; }
 }
 
+/* ===================== UI v2 overrides ===================== */
+body{font-size:16px; line-height:1.5;}
+h1,h2,h3,h4{font-family:var(--font-display); color:var(--text); font-weight:600; letter-spacing:-0.01em;}
+#bg-slideshow{display:none !important;}
+.topbar{background:var(--primary); box-shadow:none; border-bottom:1px solid var(--primary-deepest);}
+.topbar .brand-text .t1{text-transform:none; letter-spacing:0; font-size:12.5px; opacity:.88;}
+.topbar .brand-text .t2{font-weight:600;}
+.card, .stat-card, .review-block{box-shadow:var(--shadow-sm);}
+.stat-card{background:var(--surface); border:1px solid var(--border);}
+.stat-card .num{font-family:var(--font-display); font-weight:600; color:var(--text); letter-spacing:-0.02em; font-variant-numeric:tabular-nums;}
+.stat-card .lbl{text-transform:none; letter-spacing:0; font-size:14px; color:var(--text-muted); margin-top:6px;}
+.stat-card.accent .num{color:var(--accent-dark);}
+.section-title{text-transform:none; letter-spacing:0; font-family:var(--font-display); font-size:16px; font-weight:600; color:var(--text);}
+.value-table th{text-transform:none; letter-spacing:0; font-size:13px;}
+.review-line .v, .hh-badge, .value-table td, #record-count-pill{font-variant-numeric:tabular-nums;}
+.record-item .status-tag, .record-item .hh-badge.missing, .status-tag{text-transform:none; letter-spacing:0; font-size:12px;}
+.bottomnav button{font-size:12px; min-height:56px;}
+.badge-count{font-size:11.5px;}
+.warn-box{font-size:14px; line-height:1.45;}
+.toast{font-size:14px;}
+.status-tag.none{background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border);}
+.badge.none{background:#66716C;}
+.topbar .brand-text .t2{font-size:15.5px; line-height:1.25;}
+.review-block h4{text-transform:none; letter-spacing:0; font-family:var(--font-display); font-size:16px; font-weight:600; color:var(--text);}
+.review-line{font-size:15px;}
+.stat-card.accent{border-color:var(--border); box-shadow:inset 0 3px 0 var(--accent), var(--shadow-sm);}
+@media (max-width: 420px){ .offline-pill .pill-count{display:none;} }
+input[type=password]::placeholder{letter-spacing:.01em; font-size:16px;}
+/* icons */
+.ico{width:1.2em; height:1.2em; flex-shrink:0; vertical-align:-0.22em;}
+.bottomnav button .ic{display:inline-flex; font-size:0;}
+.bottomnav button .ic .ico{width:23px; height:23px;}
+.chip .ico{width:17px; height:17px; margin-right:5px; vertical-align:-3px;}
+.row-action .icon{display:inline-flex; align-items:center; justify-content:center; color:var(--primary);}
+.row-action .icon .ico{width:24px; height:24px;}
+.empty-state .icon{display:inline-flex; color:var(--text-muted);}
+.empty-state .icon .ico{width:40px; height:40px;}
+.ico.ok{color:var(--success);} .ico.warn{color:var(--accent-dark);} .ico.bad{color:var(--danger);}
+.rm-row .ico{width:16px; height:16px;}
+/* focus: always visible for keyboard users */
+:focus-visible{outline:3px solid var(--focus); outline-offset:2px;}
+.topbar :focus-visible{outline-color:#fff;}
+button, .chip, .clickable, [data-view], summary, label[for]{cursor:pointer;}
+/* touch targets on phones */
+@media (pointer:coarse){
+  .chip, .btn, .bottomnav button, .row-action, .review-line.clickable{min-height:44px;}
+  .rm-row{min-width:44px; min-height:44px;}
+}
+/* respect the phone's reduced-motion setting everywhere */
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important;}
+}
+/* desktop */
+@media (min-width: 900px){
+  .bottomnav{background:var(--surface); gap:4px;}
+  .bottomnav button{flex:0 0 auto; min-height:44px; font-size:14px; font-weight:600;}
+  .bottomnav button.active{background:var(--primary-light); color:var(--primary-dark);}
+  .view{max-width:1040px;}
+  .stat-grid{grid-template-columns:repeat(4, 1fr);}
+}
+
 @media print{
   :root{
     --bg:#FAF7F2; --surface:#FFFFFF; --surface-2:#F2ECE0;
@@ -568,7 +633,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
       <div class="t2">Economic &amp; MSME Survey</div>
     </div>
   </div>
-  <div class="offline-pill"><span class="dot" id="offline-dot"></span><span id="offline-status-text">Checking…</span> · <span id="record-count-pill">0</span></div>
+  <div class="offline-pill"><span class="dot" id="offline-dot"></span><span id="offline-status-text">Checking…</span><span class="pill-count"> · <span id="record-count-pill">0</span></span></div>
 </div>
 
 <div id="view-dashboard" class="view">
@@ -585,8 +650,8 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <div class="card" id="district-breakdown"></div>
 
   <div style="display:flex; gap:10px; margin:14px 0;">
-    <button class="row-action" id="btn-open-map" style="flex:1; margin-bottom:0;"><div class="icon">🗺️</div><div class="txt"><strong>Province Map</strong><span>See coverage across all 23 LLGs</span></div><div class="chev">›</div></button>
-    <button class="row-action" id="btn-open-dataquality" style="flex:1; margin-bottom:0;"><div class="icon">🔎</div><div class="txt"><strong>Data Quality</strong><span>Records worth a second look</span></div><div class="chev">›</div></button>
+    <button class="row-action" id="btn-open-map" style="flex:1; margin-bottom:0;"><div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z" /> <path d="M15 5.764v15" /> <path d="M9 3.236v15" /></svg></div><div class="txt"><strong>Province Map</strong><span>See coverage across all 23 LLGs</span></div><div class="chev">›</div></button>
+    <button class="row-action" id="btn-open-dataquality" style="flex:1; margin-bottom:0;"><div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" /></svg></div><div class="txt"><strong>Data Quality</strong><span>Records worth a second look</span></div><div class="chev">›</div></button>
   </div>
 
   <div class="section-title">Recent records</div>
@@ -595,9 +660,9 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 
 <div id="view-records" class="view" hidden>
   <div class="filter-chips" id="records-mode-toggle" style="display:none;">
-    <button class="chip active" data-mode="list">📋 List</button>
-    <button class="chip" data-mode="summary">📊 Summary</button>
-    <button class="chip" data-mode="prices">💲 Market Prices</button>
+    <button class="chip active" data-mode="list"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h.01" /> <path d="M3 12h.01" /> <path d="M3 19h.01" /> <path d="M8 5h13" /> <path d="M8 12h13" /> <path d="M8 19h13" /></svg>List</button>
+    <button class="chip" data-mode="summary"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3v16a2 2 0 0 0 2 2h16" /> <path d="M18 17V9" /> <path d="M13 17V5" /> <path d="M8 17v-3" /></svg>Summary</button>
+    <button class="chip" data-mode="prices"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /> <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8" /> <path d="M12 18V6" /></svg>Market Prices</button>
   </div>
   <div id="records-list-mode">
     <div class="search-bar">
@@ -635,7 +700,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 <div id="view-transfer" class="view" hidden>
   <div class="section-title">Connection status</div>
   <div class="card" id="offline-readiness-card" style="display:flex; align-items:center; gap:12px;">
-    <div style="font-size:22px;" id="offline-readiness-icon">⏳</div>
+    <div style="font-size:22px;" id="offline-readiness-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /> <path d="M12 6v6l4 2" /></svg></div>
     <div style="flex:1;">
       <strong id="offline-readiness-title" style="display:block; font-size:14.5px;">Checking…</strong>
       <span id="offline-readiness-desc" style="font-size:12px; color:var(--text-muted);">Working it out</span>
@@ -645,8 +710,8 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
   <div class="section-title">Send data to HQ</div>
   <div class="card">
     <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Export everything collected on this device. Share the file by email, USB, or Bluetooth when you reach connectivity or a computer.</p>
-    <button class="row-action" id="btn-export-json"><div class="icon">📤</div><div class="txt"><strong>Export all as JSON</strong><span>Full backup — for re-import into this app at HQ</span></div><div class="chev">›</div></button>
-    <button class="row-action" id="btn-export-csv"><div class="icon">📊</div><div class="txt"><strong>Export all as CSV</strong><span>Open in Excel / Google Sheets</span></div><div class="chev">›</div></button>
+    <button class="row-action" id="btn-export-json"><div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12" /> <path d="m17 8-5-5-5 5" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /></svg></div><div class="txt"><strong>Export all as JSON</strong><span>Full backup — for re-import into this app at HQ</span></div><div class="chev">›</div></button>
+    <button class="row-action" id="btn-export-csv"><div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3v16a2 2 0 0 0 2 2h16" /> <path d="M18 17V9" /> <path d="M13 17V5" /> <path d="M8 17v-3" /></svg></div><div class="txt"><strong>Export all as CSV</strong><span>Open in Excel / Google Sheets</span></div><div class="chev">›</div></button>
   </div>
 
   <div class="section-title">Restore an LLG's Data</div>
@@ -673,7 +738,7 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
     <div class="card">
       <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:12px;">Import a JSON file exported from this app on another device. Existing records are kept; matching IDs are updated.</p>
       <label class="file-drop" for="import-file-input">
-        <div style="font-size:26px; margin-bottom:6px;">📥</div>
+        <div style="font-size:26px; margin-bottom:6px; color:var(--primary);"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 15V3" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /> <path d="m7 10 5 5 5-5" /></svg></div>
         <div><strong>Tap to choose a .json file</strong></div>
         <div class="hint">Only files exported from this app</div>
         <input type="file" id="import-file-input" accept="application/json,.json">
@@ -752,9 +817,9 @@ body.locked .topbar, body.locked .bottomnav{ display:none; }
 <div class="toast" id="toast"></div>
 
 <div class="bottomnav">
-  <button data-view="dashboard" class="active"><span class="ic">🏠</span>Home</button>
-  <button data-view="records"><span class="ic">🗂️</span>Records</button>
-  <button data-view="transfer"><span class="ic">🔄</span>Transfer</button>
+  <button data-view="dashboard" class="active"><span class="ic"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></span>Home</button>
+  <button data-view="records"><span class="ic"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></svg></span>Records</button>
+  <button data-view="transfer"><span class="ic"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3 4 7l4 4" /> <path d="M4 7h16" /> <path d="m16 21 4-4-4-4" /> <path d="M20 17H4" /></svg></span>Transfer</button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
