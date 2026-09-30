@@ -505,6 +505,7 @@ function goToDistrictLLGs(district) {
   $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'list'));
   $('#records-list-mode').hidden = false;
   $('#records-summary-mode').hidden = true;
+  $('#records-prices-mode').hidden = true;
   switchView('records');
 }
 
@@ -521,6 +522,7 @@ function goToSpecificLLG(district, llg) {
   $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'list'));
   $('#records-list-mode').hidden = false;
   $('#records-summary-mode').hidden = true;
+  $('#records-prices-mode').hidden = true;
   switchView('records');
 }
 
@@ -529,6 +531,7 @@ async function goToSummary(opts = {}) {
   $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'summary'));
   $('#records-list-mode').hidden = true;
   $('#records-summary-mode').hidden = false;
+  $('#records-prices-mode').hidden = true;
   // Always set scope explicitly, one way or the other - the Dashboard's own
   // numbers are always province-wide, so a click from there must never land
   // on a stale district/LLG/ward left over from an earlier Summary visit.
@@ -878,6 +881,7 @@ function goToFlaggedRecords(category, llg, ward, title) {
   $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'list'));
   $('#records-list-mode').hidden = false;
   $('#records-summary-mode').hidden = true;
+  $('#records-prices-mode').hidden = true;
   switchView('records');
 }
 
@@ -1129,7 +1133,9 @@ $all('#records-mode-toggle .chip').forEach(btn => btn.addEventListener('click', 
   const mode = btn.dataset.mode;
   $('#records-list-mode').hidden = (mode !== 'list');
   $('#records-summary-mode').hidden = (mode !== 'summary');
+  $('#records-prices-mode').hidden = (mode !== 'prices');
   if (mode === 'summary') renderRecordsSummary();
+  if (mode === 'prices') renderMarketPricesTab();
 }));
 
 function tallyEntries(tallyObj) {
@@ -1489,24 +1495,6 @@ async function renderRecordsSummary() {
     ...(cropsOk ? cropsResult.value.data : {}),
   };
 
-  let marketPrices = {};
-  try {
-    const { data: mpData, error: mpError } = await rpcWithRetry('get_market_price_summary', {});
-    if (mpError) throw mpError;
-    marketPrices = mpData || {};
-  } catch (e) {
-    console.error('Failed to load market prices (non-fatal, rest of summary still shows):', e);
-  }
-
-  let priceComparison = [];
-  try {
-    const { data: pcData, error: pcError } = await rpcWithRetry('get_price_comparison', {});
-    if (pcError) throw pcError;
-    priceComparison = pcData || [];
-  } catch (e) {
-    console.error('Failed to load price comparison (non-fatal, rest of summary still shows):', e);
-  }
-
   const total = s.total || 0;
   if (total === 0) {
     container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No records yet.<br>The summary fills in once records are collected or imported.</p></div>`;
@@ -1570,8 +1558,6 @@ async function renderRecordsSummary() {
   if (failedSections.length > 0) {
     html += `<div class="warn-box" style="background:var(--accent-light); color:#8A4A05;">⚠ Couldn't load: ${esc(failedSections.join(', '))}. The rest of the summary below is showing correctly — try refreshing to load the missing part(s).</div>`;
   }
-
-  html += marketPricesCardHTML(marketPrices);
 
   html += `<div class="stat-grid" id="summary-status-anchor">
     <div class="stat-card"><div class="num" data-countup="${total}">0</div><div class="lbl">Total surveyed</div></div>
@@ -1652,7 +1638,6 @@ async function renderRecordsSummary() {
     </div>
   </div>`;
   html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${(cashCrops[c] && cashCrops[c].trees) || 0} trees)`, (cashCrops[c] && cashCrops[c].blocks) || 0]));
-  html += priceComparisonCardHTML(priceComparison, marketPrices, cashCrops);
   const informalActivities = (s.informal_activities || []).map(a => [a.label, a.count]);
   if (informalActivities.length) html += barBlockHTML('G. Informal Sector — Activity Types', informalActivities);
   html += reviewBlockHTML('G. Informal Sector', [['Total informal activities recorded', informalCount]]);
@@ -1681,7 +1666,110 @@ async function renderRecordsSummary() {
     renderRecordsSummary._ward = e.target.value || null;
     renderRecordsSummary();
   });
+}
 
+/* ------------------------------ market prices tab ------------------------------ */
+// Market prices live on their own tab so they load independently of the main
+// summary: the summary no longer waits on price data, and the prices no longer
+// wait on the heavier summary sections.
+async function renderMarketPricesTab() {
+  const container = $('#records-prices-mode');
+  container.innerHTML = skeletonChart() + skeletonRows(3);
+
+  // Shares the Summary tab's District/LLG/Ward selection, so switching
+  // between the two tabs keeps the same area in view.
+  const scopeDistrict = renderRecordsSummary._district || null;
+  const scopeLLG = renderRecordsSummary._llg || null;
+  const scopeWard = renderRecordsSummary._ward || null;
+
+  const [marketResult, comparisonResult, cropsResult] = await Promise.allSettled([
+    rpcWithRetry('get_market_price_summary', {}),
+    rpcWithRetry('get_price_comparison', {}),
+    // Crop totals only feed the "Estimated Value" table inside the comparison
+    // card - if this call fails, the prices still show, just without that table.
+    rpcWithRetry('get_summary_crops_trend', { weeks_back: 8, p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard }),
+  ]);
+
+  const marketOk = marketResult.status === 'fulfilled' && !marketResult.value.error;
+  const comparisonOk = comparisonResult.status === 'fulfilled' && !comparisonResult.value.error;
+  const cropsOk = cropsResult.status === 'fulfilled' && !cropsResult.value.error;
+  if (!marketOk) console.error('Failed to load market prices:', marketResult.status === 'rejected' ? marketResult.reason : marketResult.value.error);
+  if (!comparisonOk) console.error('Failed to load price comparison:', comparisonResult.status === 'rejected' ? comparisonResult.reason : comparisonResult.value.error);
+  if (!cropsOk) console.error('Failed to load crop totals for estimated values (non-fatal):', cropsResult.status === 'rejected' ? cropsResult.reason : cropsResult.value.error);
+
+  if (!marketOk && !comparisonOk) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load market prices after a few attempts — check your connection.</p>
+      <button class="btn btn-outline" id="btn-retry-prices">Retry</button></div>`;
+    const retryBtn = $('#btn-retry-prices');
+    if (retryBtn) retryBtn.addEventListener('click', renderMarketPricesTab);
+    return;
+  }
+
+  const marketPrices = marketOk ? (marketResult.value.data || {}) : {};
+  const priceComparison = comparisonOk ? (comparisonResult.value.data || []) : [];
+  const cashCrops = cropsOk ? ((cropsResult.value.data || {}).cash_crops || {}) : {};
+
+  const scopeLabel = scopeWard ? `${scopeLLG} — ${scopeWard}` : scopeLLG ? scopeLLG : scopeDistrict ? scopeDistrict : 'the whole province';
+  const scopeLLGList = scopeDistrict ? (LLG_BY_DISTRICT[scopeDistrict] || []) : [];
+  const scopeWardList = scopeLLG ? (WARDS_BY_LLG[scopeLLG] || []) : [];
+  let html = `<div class="review-block card">
+    <h4>View Estimated Values For</h4>
+    <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Prices are market observations, so they're the same for every area. The estimated values in the comparison below use the tree counts for the area you pick here.</p>
+    <div class="field-row">
+      <div class="field"><label>District</label>
+        <select id="prices-scope-district">
+          <option value="">All Districts (province-wide)</option>
+          ${DISTRICTS.map(d => `<option value="${esc(d)}" ${d === scopeDistrict ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>LLG</label>
+        <select id="prices-scope-llg" ${scopeDistrict ? '' : 'disabled'}>
+          <option value="">All LLGs${scopeDistrict ? ' in ' + esc(scopeDistrict) : ''}</option>
+          ${scopeLLGList.map(l => `<option value="${esc(l)}" ${l === scopeLLG ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    ${scopeLLG ? `<div class="field"><label>Ward</label>
+      <select id="prices-scope-ward">
+        <option value="">All Wards in ${esc(scopeLLG)}</option>
+        ${scopeWardList.map(w => `<option value="${esc(w)}" ${w === scopeWard ? 'selected' : ''}>${esc(w)}</option>`).join('')}
+      </select>
+    </div>` : ''}
+  </div>`;
+  html += `<div class="warn-box">Estimated values for ${esc(scopeLabel)}. Prices are province-wide market observations.</div>`;
+  if (!marketOk || !comparisonOk) {
+    const missing = [!marketOk && 'Local Market Prices', !comparisonOk && 'Local vs. International Prices'].filter(Boolean).join(', ');
+    html += `<div class="warn-box" style="background:var(--accent-light); color:#8A4A05;">⚠ Couldn't load: ${esc(missing)}. The rest below is showing correctly — try refreshing to load the missing part.</div>`;
+  }
+  html += marketPricesCardHTML(marketPrices);
+  html += priceComparisonCardHTML(priceComparison, marketPrices, cashCrops);
+
+  container.innerHTML = html;
+  bindMarketPriceForms();
+
+  const pricesDistrictSelect = $('#prices-scope-district');
+  if (pricesDistrictSelect) pricesDistrictSelect.addEventListener('change', (e) => {
+    renderRecordsSummary._district = e.target.value || null;
+    renderRecordsSummary._llg = null;
+    renderRecordsSummary._ward = null;
+    renderMarketPricesTab();
+  });
+  // Changing the area here updates the same shared selection the Summary tab
+  // uses, then reloads just this tab.
+  const pricesLLGSelect = $('#prices-scope-llg');
+  if (pricesLLGSelect) pricesLLGSelect.addEventListener('change', (e) => {
+    renderRecordsSummary._llg = e.target.value || null;
+    renderRecordsSummary._ward = null;
+    renderMarketPricesTab();
+  });
+  const pricesWardSelect = $('#prices-scope-ward');
+  if (pricesWardSelect) pricesWardSelect.addEventListener('change', (e) => {
+    renderRecordsSummary._ward = e.target.value || null;
+    renderMarketPricesTab();
+  });
+}
+
+function bindMarketPriceForms() {
   const toggleBtn = $('#btn-toggle-price-form');
   const formEl = $('#price-observation-form');
   if (toggleBtn && formEl) {
@@ -1720,7 +1808,7 @@ async function renderRecordsSummary() {
       });
       if (error) throw error;
       toast('Price observation saved');
-      renderRecordsSummary();
+      renderMarketPricesTab();
     } catch (e) {
       console.error('Failed to save price observation:', e);
       errEl.textContent = 'Could not save — check your connection and try again.';
@@ -1765,7 +1853,7 @@ async function renderRecordsSummary() {
       });
       if (error) throw error;
       toast('International price saved');
-      renderRecordsSummary();
+      renderMarketPricesTab();
     } catch (e) {
       console.error('Failed to save international price:', e);
       errEl.textContent = 'Could not save — check your connection and try again.';
@@ -1799,7 +1887,7 @@ async function renderRecordsSummary() {
       });
       if (error) throw error;
       toast('Exchange rate saved');
-      renderRecordsSummary();
+      renderMarketPricesTab();
     } catch (e) {
       console.error('Failed to save exchange rate:', e);
       errEl.textContent = 'Could not save — check your connection and try again.';
@@ -3137,6 +3225,7 @@ window.__mapGoToLLG = function(district, llg) {
   $all('#records-mode-toggle .chip').forEach(b => b.classList.toggle('active', b.dataset.mode === 'list'));
   $('#records-list-mode').hidden = false;
   $('#records-summary-mode').hidden = true;
+  $('#records-prices-mode').hidden = true;
   drillInto('wards', district, llg);
 };
 
