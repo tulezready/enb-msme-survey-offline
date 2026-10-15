@@ -1337,6 +1337,43 @@ function priceComparisonCardHTML(priceComparison, marketPrices, cashCrops) {
   </div>`;
 }
 
+// Estimated annual turnover: recorded monthly amounts x 12 (server-side, get_summary_turnover).
+// Brackets are not annualised - only exact amounts are used. Entries the server treats as
+// entry errors (K1m+/month, or above the record's own bracket) are left out and counted.
+function annualTurnoverHTML(t, areaWord) {
+  if (!t) return '';
+  const f = t.formal || {}, inf = t.informal || {};
+  const total = (Number(f.annual_total) || 0) + (Number(inf.annual_total) || 0);
+  const n = (Number(f.count) || 0) + (Number(inf.count) || 0);
+  if (n === 0) {
+    return `<div class="review-block card"><h4>E. Estimated Annual Turnover</h4><p style="font-size:14px; color:var(--text-muted);">No monthly turnover amounts recorded in this area yet.</p></div>`;
+  }
+  const k = v => 'K' + fmtNum(Math.round(Number(v) || 0));
+  const areaBlock = areaWord && (t.by_area || []).length > 1 ? (() => {
+    const max = Math.max(1, ...t.by_area.map(a => Number(a.annual) || 0));
+    const rows = t.by_area.map(a => {
+      const pct = Math.round((Number(a.annual) || 0) / max * 100);
+      return `<div class="chart-row">
+        <div class="chart-label">${esc(a.label)} <span style="color:var(--text-muted); font-size:12px;">(${fmtNum(a.count)})</span></div>
+        <div class="chart-track"><div class="chart-fill" style="width:${pct}%"></div></div>
+        <div class="chart-value">${esc(k(a.annual))}</div>
+      </div>`;
+    }).join('');
+    return `<h4 style="margin-top:16px;">By ${esc(areaWord)}</h4>${rows}`;
+  })() : '';
+  return `<div class="review-block card">
+    <h4>E. Estimated Annual Turnover</h4>
+    <p style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">Monthly turnover amounts recorded in the survey &times; 12. Only exact amounts are used; brackets can&rsquo;t be turned into a yearly figure. Figures are estimates.</p>
+    <div class="stat-grid" style="grid-template-columns:repeat(2,1fr);">
+      <div class="stat-card accent" style="grid-column:1 / -1;"><div class="num">${k(total)}</div><div class="lbl">Estimated annual turnover<br><span style="font-weight:400; font-size:12px;">from ${fmtNum(n)} business(es) with an amount</span></div></div>
+      <div class="stat-card"><div class="num">${k(f.annual_total)}</div><div class="lbl">Formal businesses<br><span style="font-weight:400; font-size:12px;">${fmtNum(f.count)} with an amount &middot; typical ${f.annual_median != null ? k(f.annual_median) : '—'}/yr</span></div></div>
+      <div class="stat-card"><div class="num">${k(inf.annual_total)}</div><div class="lbl">Informal activities<br><span style="font-weight:400; font-size:12px;">${fmtNum(inf.count)} with an amount &middot; typical ${inf.annual_median != null ? k(inf.annual_median) : '—'}/yr</span></div></div>
+    </div>
+    ${areaBlock}
+    ${t.excluded ? `<p style="font-size:12.5px; color:var(--text-muted); margin-top:10px;">${fmtNum(t.excluded)} amount(s) left out as likely entry errors (K1,000,000+ a month, or above the bracket ticked on the same record). See Data Quality to correct them.</p>` : ''}
+  </div>`;
+}
+
 function barBlockHTML(title, pairs, opts = {}) {
   const max = Math.max(1, ...pairs.map(([, v]) => Number(v) || 0));
   const rows = pairs.map(([label, value]) => {
@@ -1472,11 +1509,12 @@ async function renderRecordsSummary() {
   // screen down. Run together for speed; core is essential (everything
   // else is built around total/by_status/by_llg), the other three degrade
   // gracefully - a missing section shows an honest note, not a blank page.
-  const [coreResult, businessResult, developmentResult, cropsResult] = await Promise.allSettled([
+  const [coreResult, businessResult, developmentResult, cropsResult, turnoverResult] = await Promise.allSettled([
     rpcWithRetry('get_summary_core', { p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard, p_official_wards: scopeOfficialWards }),
     rpcWithRetry('get_summary_business', { p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard }),
     rpcWithRetry('get_summary_development', { p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard }),
     rpcWithRetry('get_summary_crops_trend', { weeks_back: 8, p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard }),
+    rpcWithRetry('get_summary_turnover', { p_district: scopeDistrict, p_llg: scopeLLG, p_ward: scopeWard }),
   ]);
 
   const coreOk = coreResult.status === 'fulfilled' && !coreResult.value.error;
@@ -1495,6 +1533,8 @@ async function renderRecordsSummary() {
   const cropsOk = cropsResult.status === 'fulfilled' && !cropsResult.value.error;
   if (!businessOk) { failedSections.push('Business & Employment'); console.error('Failed to load summary business section:', businessResult.status === 'rejected' ? businessResult.reason : businessResult.value.error); }
   if (!developmentOk) { failedSections.push('Development & Economic'); console.error('Failed to load summary development section:', developmentResult.status === 'rejected' ? developmentResult.reason : developmentResult.value.error); }
+  const turnoverOk = turnoverResult.status === 'fulfilled' && !turnoverResult.value.error;
+  if (!turnoverOk) { failedSections.push('Annual Turnover'); console.error('Failed to load summary turnover section:', turnoverResult.status === 'rejected' ? turnoverResult.reason : turnoverResult.value.error); }
   if (!cropsOk) { failedSections.push('Cash Crops & Trend'); console.error('Failed to load summary crops/trend section:', cropsResult.status === 'rejected' ? cropsResult.reason : cropsResult.value.error); }
 
   const s = {
@@ -1529,7 +1569,8 @@ async function renderRecordsSummary() {
   const printHeader = `<div class="print-header"><div class="ph-row">
     <div class="ph-seal"><img src="logo.svg" alt="ENB logo"></div>
     <div>
-      <div class="ph-title">ENBPA &middot; Division of Commerce &amp; Industry — Economic &amp; MSME Survey Report</div>
+      <div class="ph-sub-label" style="font-size:10px; color:var(--text-muted); letter-spacing:.04em; text-transform:uppercase;">East New Britain Provincial Administration</div>
+      <div class="ph-title">Division of Commerce &amp; Industry — Economic &amp; MSME Survey Report</div>
       <div class="ph-sub-label" style="font-size:10px; color:var(--text-muted); letter-spacing:.04em; text-transform:uppercase;">Provincial HQ (PHQ)</div>
       <div class="ph-sub">Generated ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })} · ${total} record(s)</div>
     </div>
@@ -1646,6 +1687,7 @@ async function renderRecordsSummary() {
       <div class="stat-card"><div class="num">${econ.avg_expenses != null ? 'K' + econ.avg_expenses.toLocaleString() : '—'}</div><div class="lbl">Average expenses</div></div>
     </div>
   </div>`;
+  html += annualTurnoverHTML(turnoverOk ? turnoverResult.value.data : null, scopeWard ? null : scopeLLG ? 'ward' : scopeDistrict ? 'LLG' : 'district');
   html += barBlockHTML('F. Cash Crop Totals (blocks)', FIXED_CROPS.map(c => [`${c} (${(cashCrops[c] && cashCrops[c].trees) || 0} trees)`, (cashCrops[c] && cashCrops[c].blocks) || 0]));
   const informalActivities = (s.informal_activities || []).map(a => [a.label, a.count]);
   if (informalActivities.length) html += barBlockHTML('G. Informal Sector — Activity Types', informalActivities);

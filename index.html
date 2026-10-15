@@ -571,6 +571,16 @@ input[type=password]::placeholder{letter-spacing:.01em; font-size:16px;}
 .empty-state .icon .ico{width:40px; height:40px;}
 .ico.ok{color:var(--success);} .ico.warn{color:var(--accent-dark);} .ico.bad{color:var(--danger);}
 .rm-row .ico{width:16px; height:16px;}
+/* amount cards inside summary blocks: one per row on phones so large Kina figures fit */
+@media (max-width: 520px){ .review-block .stat-grid{grid-template-columns:1fr !important;} .review-block .stat-card[style*="grid-column"]{grid-column:auto !important;} }
+/* header: org name, division, app */
+.topbar .brand-text .t1{font-size:11.5px;}
+.topbar .brand-text .t3{font-size:12px; opacity:.85; margin-top:1px;}
+@media (max-width: 420px){
+  .topbar .brand-text .t1{font-size:10.5px;}
+  .topbar .brand-text .t2{font-size:14px;}
+  .topbar .brand-text .t3{font-size:11px;}
+}
 /* focus: always visible for keyboard users */
 :focus-visible{outline:3px solid var(--focus); outline-offset:2px;}
 .topbar :focus-visible{outline-color:#fff;}
@@ -629,8 +639,9 @@ button, .chip, .clickable, [data-view], summary, label[for]{cursor:pointer;}
   <div class="brand">
     <div class="seal"><img src="logo.svg" alt="ENBPA Division of Commerce & Industry logo"></div>
     <div class="brand-text">
-      <div class="t1">ENBPA &middot; PHQ</div>
-      <div class="t2">Economic &amp; MSME Survey</div>
+      <div class="t1">East New Britain Provincial Administration</div>
+      <div class="t2">Division of Commerce &amp; Industry</div>
+      <div class="t3">PHQ &middot; Economic &amp; MSME Survey</div>
     </div>
   </div>
   <div class="offline-pill"><span class="dot" id="offline-dot"></span><span id="offline-status-text">Checking…</span><span class="pill-count"> · <span id="record-count-pill">0</span></span></div>
