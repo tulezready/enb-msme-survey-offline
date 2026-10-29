@@ -573,6 +573,18 @@ input[type=password]::placeholder{letter-spacing:.01em; font-size:16px;}
 .rm-row .ico{width:16px; height:16px;}
 /* amount cards inside summary blocks: one per row on phones so large Kina figures fit */
 @media (max-width: 520px){ .review-block .stat-grid{grid-template-columns:1fr !important;} .review-block .stat-card[style*="grid-column"]{grid-column:auto !important;} }
+/* survey progress vs total households */
+.hh-progress{margin-top:6px;}
+.hh-track{height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden;}
+.hh-fill{height:100%; background:var(--primary); border-radius:4px;}
+.hh-progress.over .hh-fill{background:var(--accent-dark);}
+.hh-label{font-size:12.5px; color:var(--text-muted); margin-top:3px; font-variant-numeric:tabular-nums;}
+.hh-progress.over .hh-label{color:var(--accent-dark);}
+.hh-rows{display:flex; flex-direction:column; gap:12px; margin-top:16px;}
+.hh-row-label{font-size:14px; font-weight:600;}
+.hh-of{font-size:12.5px; color:var(--text-muted); font-weight:400;}
+.hh-note{font-size:12px; color:var(--text-muted); margin-top:8px;}
+@media print{ .hh-fill{-webkit-print-color-adjust:exact; print-color-adjust:exact;} }
 /* header: org name, division, app */
 .topbar .brand-text .t1{font-size:11.5px;}
 .topbar .brand-text .t3{font-size:12px; opacity:.85; margin-top:1px;}

@@ -33,6 +33,36 @@ const LLG_BY_DISTRICT = {
   'Pomio': ['Central Pomio Rural', 'Inland Pomio Rural', 'East Pomio Rural', 'Melkoi Rural', 'Sinivit Rural', 'West Pomio Rural', 'Mamusi Rural'],
   'Rabaul': ['Balanataman Rural', 'Kombiu Rural', 'Rabaul Urban', 'Watom Island Rural']
 };
+// Total households in each LLG, supplied by the Division of Commerce & Industry
+// (29 Oct 2026). Used only to show survey progress: records collected ÷ these totals.
+// Update here if the Division revises a figure.
+const LLG_HOUSEHOLDS = {
+  'Central Gazelle Rural': 10574, 'Inland Baining Rural': 5892, 'Lassul Baining Rural': 1959, 'Open Bay Rural': 1013,
+  'Livuan Rural': 3709, 'Reimber Rural': 3401, 'Toma Rural': 3707, 'Vunadidir Rural': 3172,
+  'Bitapaka Rural': 3841, 'Duke of York Rural': 3426, 'Kokopo-Vunamami Urban': 5322, 'Raluana Rural': 2960,
+  'Central Pomio Rural': 1581, 'Inland Pomio Rural': 1950, 'East Pomio Rural': 1472, 'Melkoi Rural': 2629,
+  'Sinivit Rural': 3317, 'West Pomio Rural': 2123, 'Mamusi Rural': 1997,
+  'Balanataman Rural': 4837, 'Kombiu Rural': 2283, 'Rabaul Urban': 928, 'Watom Island Rural': 650
+};
+function districtHouseholds(district) {
+  return (LLG_BY_DISTRICT[district] || []).reduce((sum, llg) => sum + (LLG_HOUSEHOLDS[llg] || 0), 0);
+}
+function provinceHouseholds() {
+  return DISTRICTS.reduce((sum, d) => sum + districtHouseholds(d), 0);
+}
+// "1,234 of 3,401 households · 36%" with a thin bar. Over 100% is shown as it is
+// (not capped) and flagged, because it usually means duplicate entries.
+function householdProgressHTML(recorded, totalHouseholds) {
+  if (!totalHouseholds) return '';
+  const n = Number(recorded) || 0;
+  const pct = n / totalHouseholds;
+  const over = pct > 1;
+  return `<div class="hh-progress${over ? ' over' : ''}">
+    <div class="hh-track"><div class="hh-fill" style="width:${Math.min(100, Math.round(pct * 100))}%"></div></div>
+    <div class="hh-label">${fmtNum(n)} of ${fmtNum(totalHouseholds)} households · ${Math.round(pct * 100)}%${over ? ' — more records than households; check for duplicates' : ''}</div>
+  </div>`;
+}
+
 function llgOptionsHTML(district, currentLlg) {
   const list = LLG_BY_DISTRICT[district] || [];
   let opts = `<option value="">${district ? 'Select LLG…' : 'Select district first'}</option>`;
@@ -707,8 +737,8 @@ async function renderDashboard() {
   }
 
   dEl.innerHTML = DISTRICTS.map(d => `
-    <div class="review-line clickable" data-district="${esc(d)}"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${fmtNum((stats.by_district && stats.by_district[d]) || 0)}</span></div>
-  `).join('');
+    <div class="review-line clickable" data-district="${esc(d)}"><span class="k">${districtDotHTML(d)}${esc(d)}</span><span class="v">${fmtNum((stats.by_district && stats.by_district[d]) || 0)} <span class="hh-of">of ${fmtNum(districtHouseholds(d))} · ${Math.round(((stats.by_district && stats.by_district[d]) || 0) / (districtHouseholds(d) || 1) * 100)}%</span></span></div>
+  `).join('') + `<p class="hh-note">Records collected out of each district's total households.</p>`;
   $all('#district-breakdown .review-line').forEach(el => {
     el.addEventListener('click', () => goToDistrictLLGs(el.dataset.district));
   });
@@ -931,13 +961,13 @@ function renderBreadcrumb() {
   }));
 }
 
-function drillRowHTML(label, total, lastUploaded, colorDot) {
+function drillRowHTML(label, total, lastUploaded, colorDot, totalHouseholds) {
   const isRecent = lastUploaded && (Date.now() - new Date(lastUploaded).getTime()) < 48 * 60 * 60 * 1000;
   const dateLine = lastUploaded
     ? `<div class="drill-recent${isRecent ? '' : ' drill-older'}"><span class="dot"></span>Last uploaded: ${fmtDate(lastUploaded)}</div>`
     : `<div class="drill-recent drill-none">No uploads yet</div>`;
   return `<div class="record-item drill-row" data-value="${esc(label)}">
-    <div class="info"><strong>${colorDot || ''}${esc(label)}</strong>${dateLine}</div>
+    <div class="info"><strong>${colorDot || ''}${esc(label)}</strong>${dateLine}${householdProgressHTML(total, totalHouseholds)}</div>
     <div class="stacked-total-badge">${total}</div>
     <div class="chev">›</div>
   </div>`;
@@ -965,7 +995,7 @@ async function renderDistrictLevel() {
     const { data, error } = await sb.rpc('get_district_overview');
     if (error) throw error;
     const rows = data || [];
-    container.innerHTML = rows.map(r => drillRowHTML(r.district, r.total, r.last_uploaded, districtDotHTML(r.district))).join('');
+    container.innerHTML = rows.map(r => drillRowHTML(r.district, r.total, r.last_uploaded, districtDotHTML(r.district), districtHouseholds(r.district))).join('');
     $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('llgs', el.dataset.value, null)));
   } catch (e) {
     console.error('Failed to load district overview:', e);
@@ -985,7 +1015,7 @@ async function renderLLGLevel() {
     const { data, error } = await sb.rpc('get_llg_overview', { p_district: recordsDrillDistrict, p_official_llgs: officialLLGs });
     if (error) throw error;
     const rows = data || [];
-    container.innerHTML = rows.map(r => drillRowHTML(r.llg, r.total, r.last_uploaded)).join('');
+    container.innerHTML = rows.map(r => drillRowHTML(r.llg, r.total, r.last_uploaded, '', LLG_HOUSEHOLDS[r.llg])).join('');
     $all('.drill-row', container).forEach(el => el.addEventListener('click', () => drillInto('wards', recordsDrillDistrict, el.dataset.value)));
   } catch (e) {
     console.error('Failed to load LLG overview:', e);
@@ -1374,6 +1404,31 @@ function annualTurnoverHTML(t, areaWord) {
   </div>`;
 }
 
+// Survey progress against the Division's household totals, at the summary's scope.
+function householdCoverageHTML(s, total, scopeDistrict, scopeLLG, scopeWard) {
+  if (scopeWard) return ''; // no household totals at ward level yet
+  const recs = row => (Number(row.formal) || 0) + (Number(row.informal) || 0) + (Number(row.none) || 0) + (Number(row.unknown) || 0);
+  let headTotal, rows = [];
+  if (scopeLLG) {
+    headTotal = LLG_HOUSEHOLDS[scopeLLG] || 0;
+  } else if (scopeDistrict) {
+    headTotal = districtHouseholds(scopeDistrict);
+    rows = (s.by_llg || []).map(r => [r.label, recs(r), LLG_HOUSEHOLDS[r.label] || 0]);
+  } else {
+    headTotal = provinceHouseholds();
+    const byD = {}; (s.by_district || []).forEach(r => { byD[r.label] = recs(r); });
+    rows = DISTRICTS.map(d => [d, byD[d] || 0, districtHouseholds(d)]);
+  }
+  if (!headTotal) return '';
+  const rowsHTML = rows.map(([label, n, hh]) => `<div class="hh-row"><div class="hh-row-label">${esc(label)}</div>${householdProgressHTML(n, hh)}</div>`).join('');
+  return `<div class="review-block card">
+    <h4>Survey Progress — Households Reached</h4>
+    <p style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">Records collected against the total households in each area, as supplied by the Division.</p>
+    ${householdProgressHTML(total, headTotal)}
+    ${rowsHTML ? `<div class="hh-rows">${rowsHTML}</div>` : ''}
+  </div>`;
+}
+
 function barBlockHTML(title, pairs, opts = {}) {
   const max = Math.max(1, ...pairs.map(([, v]) => Number(v) || 0));
   const rows = pairs.map(([label, value]) => {
@@ -1616,6 +1671,7 @@ async function renderRecordsSummary() {
     <div class="stat-card"><div class="num" data-countup="${byStatus.none}">0</div><div class="lbl">No business</div></div>
     ${byStatus.unknown ? `<div class="stat-card"><div class="num" data-countup="${byStatus.unknown}">0</div><div class="lbl">Status not recorded</div></div>` : ''}
   </div>`;
+  html += householdCoverageHTML(s, total, scopeDistrict, scopeLLG, scopeWard);
   html += donutChartHTML('Business Status Split', [
     { label: 'Formal', value: byStatus.formal, color: 'var(--primary)' },
     { label: 'Informal', value: byStatus.informal, color: 'var(--accent)' },
