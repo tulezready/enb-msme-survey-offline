@@ -575,7 +575,7 @@ async function goToSummary(opts = {}) {
   // numbers are always province-wide, so a click from there must never land
   // on a stale district/LLG/ward left over from an earlier Summary visit.
   renderRecordsSummary._district = opts.district || null;
-  renderRecordsSummary._llg = null;
+  renderRecordsSummary._llg = opts.llg || null;
   renderRecordsSummary._ward = null;
   await renderRecordsSummary();
   if (opts.scrollTo) {
@@ -589,7 +589,7 @@ function switchView(view) {
   if (view !== 'wizard') stopAutosaveInterval();
   const twoPane = window.innerWidth >= 900 && view === 'detail';
   document.body.classList.toggle('two-pane', twoPane);
-  ['dashboard', 'records', 'wizard', 'detail', 'transfer', 'dataquality', 'map', 'compose'].forEach(v => {
+  ['dashboard', 'records', 'wizard', 'detail', 'transfer', 'dataquality', 'map', 'compose', 'snapshot'].forEach(v => {
     let shouldHide = (v !== view);
     if (twoPane && v === 'records') shouldHide = false; // keep the list visible alongside the detail panel
     $('#view-' + v).hidden = shouldHide;
@@ -605,6 +605,7 @@ function switchView(view) {
   if (view === 'dataquality') renderDataQuality();
   if (view === 'map') renderProvinceMap();
   if (view === 'compose') renderComposeMessage();
+  if (view === 'snapshot') renderSnapshot(); else stopSnapshotTimer();
   pushNavState();
 }
 
@@ -3895,3 +3896,157 @@ function downloadDirectoryCSV() {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
+
+/* ------------------------------ province snapshot ------------------------------ */
+// A summary of the summaries: every LLG, district and the province on one
+// page, stamped with the date and time the figures were taken from the server.
+// Refreshes itself every minute while open, and whenever the app comes back
+// into view, so the "as at" time is always the real time of the figures shown.
+let snapshotTimer = null, snapshotTick = null, snapshotData = null;
+const PNG_TZ = 'Pacific/Port_Moresby';
+function fmtPNG(iso, withDay = true) {
+  if (!iso) return '—';
+  const d = new Date(iso); if (isNaN(d)) return iso;
+  const date = d.toLocaleDateString('en-GB', { timeZone: PNG_TZ, weekday: withDay ? 'short' : undefined, day: 'numeric', month: 'short', year: 'numeric' });
+  const time = d.toLocaleTimeString('en-US', { timeZone: PNG_TZ, hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  return `${date}, ${time}`;
+}
+function agoText(iso) {
+  if (!iso) return 'never';
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const h = Math.round(mins / 60); if (h < 24) return `${h} h ago`;
+  const d = Math.round(h / 24); return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+function stopSnapshotTimer() {
+  if (snapshotTimer) { clearInterval(snapshotTimer); snapshotTimer = null; }
+  if (snapshotTick) { clearInterval(snapshotTick); snapshotTick = null; }
+}
+function snapshotRows() {
+  const byKey = {};
+  ((snapshotData && snapshotData.llgs) || []).forEach((r) => { byKey[r.district + '|' + r.llg] = r; });
+  return DISTRICTS.map((d) => ({
+    district: d,
+    llgs: (LLG_BY_DISTRICT[d] || []).map((l) => {
+      const r = byKey[d + '|' + l] || {};
+      return { district: d, llg: l, total: r.total || 0, households: LLG_HOUSEHOLDS[l] || 0, formal: r.formal || 0, informal: r.informal || 0,
+        this_week: r.this_week || 0, today: r.today || 0, last_uploaded: r.last_uploaded || null, last_changed: r.last_changed || null,
+        repeated: r.repeated || 0, gaps: r.gaps || 0, no_name: r.no_name || 0, wards: r.wards || 0 };
+    }),
+  }));
+}
+function sumRows(list) {
+  const t = { total: 0, households: 0, formal: 0, informal: 0, this_week: 0, today: 0, repeated: 0, gaps: 0, no_name: 0, last_uploaded: null, lastLlg: '' };
+  list.forEach((r) => {
+    ['total', 'households', 'formal', 'informal', 'this_week', 'today', 'repeated', 'gaps', 'no_name'].forEach((k) => { t[k] += r[k] || 0; });
+    if (r.last_uploaded && (!t.last_uploaded || r.last_uploaded > t.last_uploaded)) { t.last_uploaded = r.last_uploaded; t.lastLlg = r.llg; }
+  });
+  return t;
+}
+const pctOf = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+async function renderSnapshot(silent) {
+  const c = $('#snapshot-content');
+  if (!silent || !snapshotData) c.innerHTML = skeletonRows(6);
+  const { data, error } = await rpcWithRetry('get_province_snapshot', {});
+  if (currentView !== 'snapshot') return;
+  if (error || !data) {
+    if (!snapshotData) {
+      c.innerHTML = `<div class="empty-state"><div class="icon">${svgIcon('triangle-alert', 'warn')}</div><p>Could not load the snapshot — check your connection.</p><button class="btn btn-outline" id="btn-snapshot-retry">Try again</button></div>`;
+      $('#btn-snapshot-retry').onclick = () => renderSnapshot();
+    } else toast('Could not refresh — showing the last figures');
+    return;
+  }
+  snapshotData = data;
+  drawSnapshot();
+  stopSnapshotTimer();
+  snapshotTimer = setInterval(() => { if (currentView === 'snapshot' && document.visibilityState === 'visible') renderSnapshot(true); }, 60000);
+  snapshotTick = setInterval(() => { const el = $('#snap-ago'); if (el && snapshotData) el.textContent = agoText(snapshotData.as_of); }, 15000);
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && currentView === 'snapshot') renderSnapshot(true); });
+
+function drawSnapshot() {
+  const groups = snapshotRows();
+  const all = groups.flatMap((g) => g.llgs);
+  const P = sumRows(all);
+  const weekAgo = Date.now() - 7 * 864e5;
+  const stale = all.filter((r) => r.total > 0 && r.last_uploaded && new Date(r.last_uploaded).getTime() < weekAgo).length;
+  const notStarted = all.filter((r) => r.total === 0).map((r) => r.llg);
+  const checks = (r) => {
+    const bits = [];
+    if (r.repeated) bits.push(`${fmtNum(r.repeated)} repeated`);
+    if (r.gaps) bits.push(`${fmtNum(r.gaps)} gaps`);
+    if (r.no_name) bits.push(`${fmtNum(r.no_name)} no name`);
+    return bits.length ? `<span class="snap-flag">${bits.join(' · ')}</span>` : (r.total ? '<span class="snap-ok">OK</span>' : '—');
+  };
+  const pctCell = (a, b) => b ? `<span class="snap-pct">${pctOf(a, b)}%</span><span class="snap-bar"><i style="width:${Math.min(100, pctOf(a, b))}%"></i></span>` : '—';
+  const lastCell = (iso) => {
+    if (!iso) return '—';
+    const old = new Date(iso).getTime() < weekAgo;
+    return `<span class="${old ? 'snap-stale' : ''}" title="${esc(fmtPNG(iso))}">${esc(fmtPNG(iso, false))}</span>`;
+  };
+  const head = `<tr><th>LLG</th><th>Reached</th><th>Households</th><th>Progress</th><th>Formal</th><th>Informal</th><th>This week</th><th>Last upload</th><th>Checks</th></tr>`;
+  const row = (r, cls, name) => `<tr class="${cls || ''}"${!cls ? ` data-snap-llg="${esc(r.llg)}" data-snap-district="${esc(r.district)}"` : ''}>
+    <td class="${cls ? '' : 'llg'}">${name || esc(r.llg)}</td><td>${fmtNum(r.total)}</td><td>${fmtNum(r.households)}</td><td>${pctCell(r.total, r.households)}</td>
+    <td>${fmtNum(r.formal)}</td><td>${fmtNum(r.informal)}</td><td>${r.this_week ? fmtNum(r.this_week) : '—'}</td><td>${lastCell(r.last_uploaded)}</td><td>${checks(r)}</td></tr>`;
+
+  let html = `<div class="snap-asof">
+      <div class="lbl">Figures as at</div>
+      <div class="when">${esc(fmtPNG(snapshotData.as_of))}</div>
+      <div class="sub">Live from HQ · refreshed <span id="snap-ago">${agoText(snapshotData.as_of)}</span> · updates every minute while open</div>
+    </div>
+    <div class="snap-actions no-print">
+      <button class="btn btn-outline" id="btn-snap-refresh">Refresh now</button>
+      <button class="btn btn-outline" id="btn-snap-print">Print / Save as PDF</button>
+      <button class="btn btn-outline" id="btn-snap-csv">Download CSV</button>
+    </div>
+    <div class="snap-kpis">
+      <div class="snap-kpi"><div class="v">${fmtNum(P.total)}</div><div class="k">Households reached</div><div class="s">of ${fmtNum(P.households)} · ${pctOf(P.total, P.households)}%</div></div>
+      <div class="snap-kpi"><div class="v">${fmtNum(P.formal)}</div><div class="k">Formal businesses</div></div>
+      <div class="snap-kpi"><div class="v">${fmtNum(P.informal)}</div><div class="k">Informal sector</div></div>
+      <div class="snap-kpi"><div class="v">${fmtNum(P.this_week)}</div><div class="k">Uploaded this week</div><div class="s">${fmtNum(P.today)} today</div></div>
+      <div class="snap-kpi"><div class="v" style="font-size:15px;">${esc(agoText(P.last_uploaded))}</div><div class="k">Last upload</div><div class="s">${esc(P.lastLlg || '—')}</div></div>
+    </div>`;
+  groups.forEach((g) => {
+    const T = sumRows(g.llgs);
+    html += `<div class="snap-district">
+      <h3>${esc(g.district)} District</h3>
+      ${householdProgressHTML(T.total, T.households)}
+      <div class="snap-wrap"><table class="snap-table"><thead>${head}</thead><tbody>
+      ${g.llgs.map((r) => row(r)).join('')}
+      ${row({ ...T, district: g.district }, 'sub', `${esc(g.district)} total`)}
+      </tbody></table></div></div>`;
+  });
+  html += `<div class="snap-district"><h3>East New Britain Province</h3><div class="snap-wrap"><table class="snap-table"><thead>${head.replace('<th>LLG</th>', '<th>District</th>')}</thead><tbody>
+    ${groups.map((g) => { const T = sumRows(g.llgs); return row({ ...T }, 'sub', esc(g.district)); }).join('')}
+    ${row(P, 'prov', 'Province total')}
+    </tbody></table></div></div>
+    <div class="snap-note">Reached = records at HQ after duplicate cleanup. Households = Division totals per LLG. Last upload in orange = nothing new for more than 7 days${stale ? ` (${stale} LLG${stale === 1 ? '' : 's'})` : ''}. ${notStarted.length ? `No records yet: ${esc(notStarted.join(', '))}. ` : ''}Checks: repeated = household numbers used more than once in a ward; gaps = numbers skipped within a ward; no name = no household head recorded. Tap an LLG to open its Summary.</div>`;
+  const c = $('#snapshot-content');
+  c.innerHTML = html;
+  $('#btn-snap-refresh').onclick = () => renderSnapshot(true).then(() => toast('Snapshot updated'));
+  $('#btn-snap-print').onclick = () => window.print();
+  $('#btn-snap-csv').onclick = downloadSnapshotCSV;
+  $all('[data-snap-llg]', c).forEach((tr) => {
+    tr.classList.add('clickable');
+    tr.onclick = () => { stopSnapshotTimer(); goToSummary({ district: tr.dataset.snapDistrict, llg: tr.dataset.snapLlg }); };
+  });
+}
+function downloadSnapshotCSV() {
+  const groups = snapshotRows();
+  const head = ['District', 'LLG', 'Households reached', 'Total households', 'Progress %', 'Formal', 'Informal', 'Uploaded this week', 'Last upload (PNG time)', 'Repeated numbers', 'Number gaps', 'No household name'];
+  const line = (d, l, r) => [d, l, r.total, r.households, pctOf(r.total, r.households), r.formal, r.informal, r.this_week, r.last_uploaded ? fmtPNG(r.last_uploaded, false) : '', r.repeated, r.gaps, r.no_name];
+  const rows = [];
+  groups.forEach((g) => { g.llgs.forEach((r) => rows.push(line(g.district, r.llg, r))); rows.push(line(g.district, 'District total', sumRows(g.llgs))); });
+  rows.push(line('Province', 'Province total', sumRows(groups.flatMap((g) => g.llgs))));
+  const cell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const csv = '﻿' + [[`Province Snapshot as at ${fmtPNG(snapshotData.as_of)}`], [], head, ...rows].map((l) => l.map(cell).join(',')).join('\r\n');
+  const stamp = new Date(snapshotData.as_of).toLocaleString('sv-SE', { timeZone: PNG_TZ }).slice(0, 16).replace(/[: ]/g, '-');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `Province-Snapshot-${stamp}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+$('#btn-open-snapshot').addEventListener('click', () => switchView('snapshot'));
+$('#btn-snapshot-back').addEventListener('click', () => switchView('dashboard'));
