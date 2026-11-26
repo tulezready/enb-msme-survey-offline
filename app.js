@@ -3976,7 +3976,6 @@ function drawSnapshot() {
     const bits = [];
     if (r.repeated) bits.push(`${fmtNum(r.repeated)} repeated`);
     if (r.gaps) bits.push(`${fmtNum(r.gaps)} gaps`);
-    if (r.no_name) bits.push(`${fmtNum(r.no_name)} no name`);
     return bits.length ? `<span class="snap-flag">${bits.join(' · ')}</span>` : (r.total ? '<span class="snap-ok">OK</span>' : '—');
   };
   const pctCell = (a, b) => b ? `<span class="snap-pct">${pctOf(a, b)}%</span><span class="snap-bar"><i style="width:${Math.min(100, pctOf(a, b))}%"></i></span>` : '—';
@@ -4021,7 +4020,7 @@ function drawSnapshot() {
     ${groups.map((g) => { const T = sumRows(g.llgs); return row({ ...T }, 'sub', esc(g.district)); }).join('')}
     ${row(P, 'prov', 'Province total')}
     </tbody></table></div></div>
-    <div class="snap-note">Reached = records at HQ after duplicate cleanup. Households = Division totals per LLG. Last upload in orange = nothing new for more than 7 days${stale ? ` (${stale} LLG${stale === 1 ? '' : 's'})` : ''}. ${notStarted.length ? `No records yet: ${esc(notStarted.join(', '))}. ` : ''}Checks: repeated = household numbers used more than once in a ward; gaps = numbers skipped within a ward; no name = no household head recorded. Tap an LLG to open its Summary.</div>`;
+    <div class="snap-note">Reached = records at HQ after duplicate cleanup. Households = Division totals per LLG. Last upload in orange = nothing new for more than 7 days${stale ? ` (${stale} LLG${stale === 1 ? '' : 's'})` : ''}. ${notStarted.length ? `No records yet: ${esc(notStarted.join(', '))}. ` : ''}Checks: repeated = household numbers used more than once in a ward; gaps = numbers skipped within a ward. Tap an LLG to open its Summary.</div>`;
   const c = $('#snapshot-content');
   c.innerHTML = html;
   $('#btn-snap-refresh').onclick = () => renderSnapshot(true).then(() => toast('Snapshot updated'));
@@ -4034,8 +4033,8 @@ function drawSnapshot() {
 }
 function downloadSnapshotCSV() {
   const groups = snapshotRows();
-  const head = ['District', 'LLG', 'Households reached', 'Total households', 'Progress %', 'Formal', 'Informal', 'Uploaded this week', 'Last upload (PNG time)', 'Repeated numbers', 'Number gaps', 'No household name'];
-  const line = (d, l, r) => [d, l, r.total, r.households, pctOf(r.total, r.households), r.formal, r.informal, r.this_week, r.last_uploaded ? fmtPNG(r.last_uploaded, false) : '', r.repeated, r.gaps, r.no_name];
+  const head = ['District', 'LLG', 'Households reached', 'Total households', 'Progress %', 'Formal', 'Informal', 'Uploaded this week', 'Last upload (PNG time)', 'Repeated numbers', 'Number gaps'];
+  const line = (d, l, r) => [d, l, r.total, r.households, pctOf(r.total, r.households), r.formal, r.informal, r.this_week, r.last_uploaded ? fmtPNG(r.last_uploaded, false) : '', r.repeated, r.gaps];
   const rows = [];
   groups.forEach((g) => { g.llgs.forEach((r) => rows.push(line(g.district, r.llg, r))); rows.push(line(g.district, 'District total', sumRows(g.llgs))); });
   rows.push(line('Province', 'Province total', sumRows(groups.flatMap((g) => g.llgs))));
