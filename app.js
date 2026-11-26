@@ -4032,7 +4032,7 @@ function drawSnapshot() {
   const c = $('#snapshot-content');
   c.innerHTML = `<div class="snap-page">${html}</div>`;
   $('#btn-snap-refresh').onclick = () => renderSnapshot(true).then(() => toast('Snapshot updated'));
-  $('#btn-snap-print').onclick = () => window.print();
+  $('#btn-snap-print').onclick = printSnapshot;
   $('#btn-snap-csv').onclick = downloadSnapshotCSV;
   $all('[data-snap-llg]', c).forEach((tr) => {
     tr.classList.add('clickable');
@@ -4057,3 +4057,80 @@ function downloadSnapshotCSV() {
 }
 $('#btn-open-snapshot').addEventListener('click', () => switchView('snapshot'));
 $('#btn-snapshot-back').addEventListener('click', () => switchView('dashboard'));
+
+// Prints the snapshot from its own clean page (in a hidden frame) instead of the
+// app screen, so nothing from the app layout - the sidebar, the screen widths,
+// the browser's zoom - can push the table off the paper.
+function printSnapshot() {
+  if (!snapshotData) return;
+  const groups = snapshotRows();
+  const all = groups.flatMap((g) => g.llgs);
+  const P = sumRows(all);
+  const weekAgo = Date.now() - 7 * 864e5;
+  const checks = (r) => [r.repeated ? `${fmtNum(r.repeated)} repeated` : '', r.gaps ? `${fmtNum(r.gaps)} gaps` : ''].filter(Boolean).join(' · ') || (r.total ? 'OK' : '—');
+  const last = (iso) => iso ? `<span class="${new Date(iso).getTime() < weekAgo ? 'stale' : ''}">${esc(fmtPNG(iso, false))}</span>` : '—';
+  const head = (first) => `<tr><th class="l">${first}</th><th>Reached</th><th>Households</th><th>Progress</th><th>Formal</th><th>Informal</th><th>This week</th><th class="lu">Last upload</th><th class="ck">Checks</th></tr>`;
+  const row = (r, name, cls) => `<tr class="${cls || ''}"><td class="l">${name}</td><td>${fmtNum(r.total)}</td><td>${fmtNum(r.households)}</td><td>${r.households ? pctOf(r.total, r.households) + '%' : '—'}</td><td>${fmtNum(r.formal)}</td><td>${fmtNum(r.informal)}</td><td>${r.this_week ? fmtNum(r.this_week) : '—'}</td><td class="lu">${last(r.last_uploaded)}</td><td class="ck">${checks(r)}</td></tr>`;
+  const tables = groups.map((g) => {
+    const T = sumRows(g.llgs);
+    return `<section><h2>${esc(g.district)} District <span>${fmtNum(T.total)} of ${fmtNum(T.households)} households · ${pctOf(T.total, T.households)}%</span></h2>
+      <table><thead>${head('LLG')}</thead><tbody>${g.llgs.map((r) => row(r, esc(r.llg))).join('')}${row(T, `${esc(g.district)} total`, 'sub')}</tbody></table></section>`;
+  }).join('');
+  const prov = `<section><h2>East New Britain Province</h2><table><thead>${head('District')}</thead><tbody>
+    ${groups.map((g) => row(sumRows(g.llgs), esc(g.district))).join('')}${row(P, 'Province total', 'tot')}</tbody></table></section>`;
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><title>Province Snapshot ${esc(fmtPNG(snapshotData.as_of, false))}</title>
+<style>
+@page{size:A4 landscape; margin:10mm;}
+*{box-sizing:border-box;}
+body{margin:0; font-family:Arial, Helvetica, sans-serif; color:#222; font-size:10px;}
+header{display:flex; align-items:center; gap:10px; border-bottom:2px solid #153F38; padding-bottom:8px; margin-bottom:10px;}
+header img{width:40px; height:40px;}
+header .org{font-size:9px; text-transform:uppercase; letter-spacing:.04em; color:#666;}
+header .t{font-size:15px; font-weight:bold; color:#0A231F;}
+header .asof{font-size:11px; margin-top:2px;}
+.kpis{display:flex; gap:6px; margin-bottom:10px;}
+.kpi{flex:1; border:1px solid #ccc; border-radius:5px; padding:6px 8px;}
+.kpi b{display:block; font-size:15px; color:#0A231F;}
+.kpi span{color:#555;}
+section{break-inside:avoid; page-break-inside:avoid; margin-bottom:10px;}
+h2{font-size:12px; margin:0 0 4px; color:#0A231F; display:flex; justify-content:space-between;}
+h2 span{font-weight:normal; color:#555; font-size:10px;}
+table{width:100%; border-collapse:collapse; table-layout:fixed;}
+th, td{border-bottom:1px solid #ddd; padding:3px 4px; text-align:right; font-size:10px;}
+th{font-size:8.5px; text-transform:uppercase; color:#555; border-bottom:1px solid #999;}
+th.lu, td.lu{width:15%; white-space:nowrap;}
+th.l, td.l{text-align:left; width:17%;}
+th.ck, td.ck{width:17%;}
+tr.sub td{font-weight:bold; background:#f2ece0;}
+tr.tot td{font-weight:bold; background:#e3eeea;}
+.stale{color:#8A4A05; font-weight:bold;}
+.note{font-size:8.5px; color:#555;}
+*{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+</style></head><body>
+<header><img src="${location.origin}${location.pathname.replace(/[^/]*$/, '')}logo.svg" alt=""><div>
+<div class="org">East New Britain Provincial Administration · Division of Commerce &amp; Industry</div>
+<div class="t">Economic &amp; MSME Survey — Province Snapshot</div>
+<div class="asof">Figures as at <b>${esc(fmtPNG(snapshotData.as_of))}</b> (live from Provincial HQ)</div></div></header>
+<div class="kpis">
+<div class="kpi"><b>${fmtNum(P.total)}</b><span>Households reached of ${fmtNum(P.households)} · ${pctOf(P.total, P.households)}%</span></div>
+<div class="kpi"><b>${fmtNum(P.formal)}</b><span>Formal businesses</span></div>
+<div class="kpi"><b>${fmtNum(P.informal)}</b><span>Informal sector</span></div>
+<div class="kpi"><b>${fmtNum(P.this_week)}</b><span>Uploaded this week · ${fmtNum(P.today)} today</span></div>
+<div class="kpi"><b>${esc(fmtPNG(P.last_uploaded, false))}</b><span>Last upload · ${esc(P.lastLlg || '—')}</span></div>
+</div>
+${tables}${prov}
+<p class="note">Reached = records at HQ after duplicate cleanup. Households = Division totals per LLG. Last upload in bold orange = nothing new for more than 7 days. Repeated = household numbers used more than once in a ward; gaps = numbers skipped within a ward.</p>
+</body></html>`;
+  const old = document.getElementById('snap-print-frame'); if (old) old.remove();
+  const f = document.createElement('iframe');
+  f.id = 'snap-print-frame';
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:fixed; right:0; bottom:0; width:0; height:0; border:0; visibility:hidden;';
+  document.body.appendChild(f);
+  const w = f.contentWindow;
+  w.document.open(); w.document.write(doc); w.document.close();
+  let printed = false;
+  const go = () => { if (printed) return; printed = true; try { w.focus(); w.print(); } catch (e) { window.print(); } };
+  const img = w.document.querySelector('img');
+  if (img && !img.complete) { img.onload = img.onerror = () => setTimeout(go, 50); setTimeout(go, 1500); } else setTimeout(go, 100);
+}
