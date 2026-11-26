@@ -3989,7 +3989,15 @@ function drawSnapshot() {
     <td class="${cls ? '' : 'llg'}">${name || esc(r.llg)}</td><td>${fmtNum(r.total)}</td><td>${fmtNum(r.households)}</td><td>${pctCell(r.total, r.households)}</td>
     <td>${fmtNum(r.formal)}</td><td>${fmtNum(r.informal)}</td><td>${r.this_week ? fmtNum(r.this_week) : '—'}</td><td>${lastCell(r.last_uploaded)}</td><td>${checks(r)}</td></tr>`;
 
-  let html = `<div class="snap-asof">
+  let html = `<div class="print-header"><div class="ph-row">
+      <div class="ph-seal"><img src="logo.svg" alt="ENB logo"></div>
+      <div>
+        <div style="font-size:10px; color:var(--text-muted); letter-spacing:.04em; text-transform:uppercase;">East New Britain Provincial Administration</div>
+        <div class="ph-title">Division of Commerce &amp; Industry — Economic &amp; MSME Survey: Province Snapshot</div>
+        <div class="ph-sub">Figures as at ${esc(fmtPNG(snapshotData.as_of))}</div>
+      </div>
+    </div></div>
+    <div class="snap-asof no-print">
       <div class="lbl">Figures as at</div>
       <div class="when">${esc(fmtPNG(snapshotData.as_of))}</div>
       <div class="sub">Live from HQ · refreshed <span id="snap-ago">${agoText(snapshotData.as_of)}</span> · updates every minute while open</div>
@@ -4004,7 +4012,7 @@ function drawSnapshot() {
       <div class="snap-kpi"><div class="v">${fmtNum(P.formal)}</div><div class="k">Formal businesses</div></div>
       <div class="snap-kpi"><div class="v">${fmtNum(P.informal)}</div><div class="k">Informal sector</div></div>
       <div class="snap-kpi"><div class="v">${fmtNum(P.this_week)}</div><div class="k">Uploaded this week</div><div class="s">${fmtNum(P.today)} today</div></div>
-      <div class="snap-kpi"><div class="v" style="font-size:15px;">${esc(agoText(P.last_uploaded))}</div><div class="k">Last upload</div><div class="s">${esc(P.lastLlg || '—')}</div></div>
+      <div class="snap-kpi"><div class="v" style="font-size:15px;"><span class="no-print">${esc(agoText(P.last_uploaded))}</span><span class="print-only-inline">${esc(fmtPNG(P.last_uploaded, false))}</span></div><div class="k">Last upload</div><div class="s">${esc(P.lastLlg || '—')}</div></div>
     </div>`;
   groups.forEach((g) => {
     const T = sumRows(g.llgs);
@@ -4022,7 +4030,7 @@ function drawSnapshot() {
     </tbody></table></div></div>
     <div class="snap-note">Reached = records at HQ after duplicate cleanup. Households = Division totals per LLG. Last upload in orange = nothing new for more than 7 days${stale ? ` (${stale} LLG${stale === 1 ? '' : 's'})` : ''}. ${notStarted.length ? `No records yet: ${esc(notStarted.join(', '))}. ` : ''}Checks: repeated = household numbers used more than once in a ward; gaps = numbers skipped within a ward. Tap an LLG to open its Summary.</div>`;
   const c = $('#snapshot-content');
-  c.innerHTML = html;
+  c.innerHTML = `<div class="snap-page">${html}</div>`;
   $('#btn-snap-refresh').onclick = () => renderSnapshot(true).then(() => toast('Snapshot updated'));
   $('#btn-snap-print').onclick = () => window.print();
   $('#btn-snap-csv').onclick = downloadSnapshotCSV;

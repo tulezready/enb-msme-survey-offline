@@ -719,6 +719,26 @@ body.dir-open{overflow:hidden;}
   .snap-district{break-inside:avoid;}
   .snap-bar i{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
 }
+
+.print-only-inline{display:none;}
+@page snapshot{ size: A4 landscape; margin: 10mm; }
+@media print{
+  #view-dashboard, #view-records, #view-wizard, #view-transfer, #view-detail, #view-snapshot, #view-dataquality, #view-map, #view-compose{ margin-left:0 !important; }
+  .view{max-width:none !important; padding:0 !important;}
+  .snap-page{page: snapshot;}
+  .print-only-inline{display:inline;}
+  .snap-kpis{grid-template-columns:repeat(5, 1fr); gap:6px;}
+  .snap-kpi{padding:8px;}
+  .snap-kpi .v{font-size:16px;}
+  .snap-table{min-width:0 !important; width:100%; font-size:9.5px; table-layout:auto;}
+  .snap-table th{font-size:8.5px; padding:4px 5px; white-space:normal;}
+  .snap-table td{padding:4px 5px;}
+  .snap-table td:last-child{white-space:normal; min-width:90px;}
+  .snap-bar{display:none;}
+  .snap-district{margin-bottom:8px;}
+  .snap-district .hh-progress{margin:2px 14px 6px;}
+  .snap-note{font-size:9.5px;}
+}
 </style>
 </head>
 <body data-role="hq">
