@@ -2113,6 +2113,7 @@ async function openDetail(id) {
         <button class="btn btn-primary" id="btn-detail-edit" style="flex:1;">Edit</button>
         <button class="btn btn-outline" id="btn-detail-print">Print</button>
         <button class="btn btn-outline" id="btn-detail-export">Export</button>
+        <button class="btn btn-outline" id="btn-detail-merge" title="This household was entered more than once - pick the other copy and merge them">Merge duplicate…</button>
         <button class="btn btn-danger" id="btn-detail-delete">Delete</button>
       </div>
     </div>
@@ -2129,6 +2130,7 @@ async function openDetail(id) {
       switchView('records');
     }
   };
+  $('#btn-detail-merge').onclick = () => openMergePicker(r);
   $('#btn-detail-export').onclick = () => downloadFile(`msme-${recordDisplayName(r).replace(/[,\s]+/g,'-')}.json`, JSON.stringify(r, null, 2), 'application/json');
   $('#btn-detail-print').onclick = () => { window.print(); };
   const clearLeftoverBtn = $('#btn-clear-leftover-economic');
@@ -4191,7 +4193,7 @@ function llgReportModel(L, asOf) {
   return { ...L, asOf, rows, repByWard, households, notStarted: rows.filter((w) => !w.records).map((w) => w.ward),
     missingTotal: rows.reduce((s, w) => s + (w.missing || []).length, 0), repeatedTotal: (L.repeated || []).length };
 }
-function llgReportHTML(M) {
+function llgReportHTML(M, interactive) {
   const pct = M.households ? Math.round((M.total / M.households) * 100) : null;
   const wardRow = (w) => {
     const miss = (w.missing || []).length ? compressRanges(w.missing) : '';
@@ -4204,7 +4206,7 @@ function llgReportHTML(M) {
   };
   const repSections = Object.keys(M.repByWard).sort().map((ward) => {
     const groups = M.repByWard[ward];
-    const items = Object.keys(groups).map(Number).sort((x, y) => x - y).map((n) => `<tr><td>${esc(ward)}</td><td class="num">${n}</td><td>${groups[n].map((r) => `${esc(r.name || '(no name)')} — ${esc(r.village || 'no village')}, entered ${esc(fmtPNG(r.entered, false).replace(/,.*$/, ''))}${r.hh !== String(n) ? ` (typed as “${esc(r.hh)}”)` : ''}`).join('<br>')}</td></tr>`).join('');
+    const items = Object.keys(groups).map(Number).sort((x, y) => x - y).map((n) => `<tr><td>${esc(ward)}</td><td class="num">${n}</td><td>${groups[n].map((r) => `${esc(r.name || '(no name)')} — ${esc(r.village || 'no village')}, entered ${esc(fmtPNG(r.entered, false).replace(/,.*$/, ''))}${r.hh !== String(n) ? ` (typed as “${esc(r.hh)}”)` : ''}`).join('<br>')}${interactive && groups[n].every((r) => r.id) ? `<div><button class="rpt-merge" data-merge-ids="${esc(groups[n].map((r) => r.id).join(','))}">Compare &amp; merge</button></div>` : ''}</td></tr>`).join('');
     return items;
   }).join('');
   const odd = (M.odd_numbers || []).map((o) => `<tr><td>${esc(o.ward || '(no ward)')}</td><td>“${esc(o.hh || '(blank)')}”</td><td>${esc(o.name || '(no name)')} — ${esc(o.village || 'no village')}</td></tr>`).join('');
@@ -4295,12 +4297,13 @@ async function openLlgReport(llg) {
       <button class="btn btn-outline" id="rpt-copy">Copy WhatsApp message</button>
       ${navigator.share ? '<button class="btn btn-outline" id="rpt-share">Share message</button>' : ''}
     </div>
-    <div class="rpt rpt-sheet">${llgReportHTML(M)}</div>
+    <div class="rpt rpt-sheet">${llgReportHTML(M, true)}</div>
     <h3 style="margin:18px 0 6px; font-size:14px;">WhatsApp message</h3>
     <pre class="rpt-msg">${esc(msg)}</pre>`;
   $('#rpt-print').onclick = () => printReportDoc(`${llg} report ${fmtPNG(M.asOf, false)}`, llgReportHTML(M));
   $('#rpt-copy').onclick = async () => toast((await copyText(msg)) ? 'Message copied — paste it into WhatsApp' : 'Could not copy — select the text and copy it');
   const sh = $('#rpt-share'); if (sh) sh.onclick = () => navigator.share({ text: msg }).catch(() => {});
+  $all('.rpt-merge', body).forEach((b) => { b.onclick = () => openMergeCompare(b.dataset.mergeIds.split(','), { onDone: () => openLlgReport(llg) }); });
 }
 async function printAllLlgReports(district) {
   ensureReportStyles();
@@ -4315,4 +4318,126 @@ async function printAllLlgReports(district) {
     pages.push(llgReportHTML(llgReportModel({ ...L, district: L.district || d }, data.as_of)));
   }));
   printReportDoc(`${district ? district + ' District' : 'All'} LLG reports ${fmtPNG(data.as_of, false)}`, pages.join(''));
+}
+
+/* ------------------------------ merge duplicates (HQ only) ------------------------------ */
+// Compare two or more copies of the same household side by side, pick the one
+// to keep, and merge. The server (merge_records) only lets HQ staff do this,
+// backs up every record first, copies across anything only the other copies
+// have, hides the copies and records who merged them, when and why.
+// Removed copies can be brought back from Transfer -> Deleted Records.
+function countFilled(v) {
+  if (v == null || v === '' || v === false) return 0;
+  if (Array.isArray(v)) return v.reduce((s, x) => s + countFilled(x), 0);
+  if (typeof v === 'object') return Object.entries(v).reduce((s, [k, x]) => s + (['id', 'createdAt', 'updatedAt', 'syncedAt', '_uploadedAt', 'dedupe'].includes(k) ? 0 : countFilled(x)), 0);
+  return 1;
+}
+function mergeSummary(row) {
+  const d = row.data || {}; const loc = d.location || {}; const b = d.business || {}; const emp = d.employment || {};
+  const fixed = (d.cashCrops && d.cashCrops.fixed) || {};
+  const crops = Object.keys(fixed).filter((c) => fixed[c] && (fixed[c].blocks || fixed[c].trees)).length + (((d.cashCrops || {}).others) || []).length;
+  const status = row.business_status || d.businessStatus || '—';
+  return [
+    ['Household no.', loc.householdNo || row.household_no || '—'],
+    ['Ward', loc.ward || row.ward || '—'],
+    ['Village', loc.village || '—'],
+    ['Household head', loc.contactPerson || '—'],
+    ['Mobile', loc.mobile || '—'],
+    ['Date collected', loc.dateCollected ? fmtDate(loc.dateCollected) : '—'],
+    ['Business status', status === 'formal' ? 'Formal' : status === 'informal' ? 'Informal' : status === 'none' ? 'No business' : status],
+    ['Business name', b.name || '—'],
+    ['Employed / unemployed members', `${(emp.employedMembers || []).length} / ${(emp.unemployedMembers || []).length}`],
+    ['Informal activities', String(((d.informal || {}).entries || []).length)],
+    ['Cash crops recorded', String(crops)],
+    ['Fields filled in', String(countFilled(d))],
+    ['Entered', row.created_at ? fmtPNG(row.created_at, false) : '—'],
+  ];
+}
+function mergeDialog() {
+  let el = document.getElementById('merge-dlg');
+  if (!el) { el = document.createElement('div'); el.id = 'merge-dlg'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); document.body.appendChild(el); }
+  el.hidden = false; document.body.classList.add('dir-open');
+  return el;
+}
+function closeMergeDialog() {
+  const el = document.getElementById('merge-dlg'); if (el) { el.hidden = true; el.innerHTML = ''; }
+  if (!document.querySelector('#llg-report:not([hidden]), #biz-dir:not([hidden])')) document.body.classList.remove('dir-open');
+}
+async function openMergeCompare(ids, opts = {}) {
+  const el = mergeDialog();
+  el.innerHTML = `<div class="dir-head"><div><div class="dir-title">Compare &amp; merge</div><div class="dir-scope">Same household entered more than once</div></div><button class="btn btn-outline dir-close" id="merge-close">Cancel</button></div><div class="dir-body">${skeletonRows(4)}</div>`;
+  $('#merge-close').onclick = closeMergeDialog;
+  const { data, error } = await sb.from('msme_records').select('id, household_no, ward, llg, business_status, created_at, data').in('id', ids).is('deleted_at', null);
+  const body = el.querySelector('.dir-body');
+  if (error) { body.innerHTML = `<div class="warn-box">${svgIcon('triangle-alert')} Couldn't load the records. Check the connection and try again.</div>`; return; }
+  const rows = (data || []).sort((x, y) => (x.created_at || '').localeCompare(y.created_at || ''));
+  if (rows.length < 2) { body.innerHTML = `<div class="warn-box">Only ${rows.length} of these records still exist — the other has already been merged or removed. Refresh the report.</div>`; return; }
+  const sums = rows.map(mergeSummary);
+  let keep = rows.reduce((best, r, i) => (countFilled(r.data) > countFilled(rows[best].data) ? i : best), 0);
+  const labels = sums[0].map((x) => x[0]);
+  const differs = labels.map((_, li) => new Set(sums.map((s) => String(s[li][1]).toLowerCase().trim())).size > 1);
+  const draw = () => {
+    body.innerHTML = `<p class="lead" style="margin:0 0 10px; color:var(--text-muted); font-size:13px;">Choose the copy to keep. Anything filled in only on the other ${rows.length > 2 ? 'copies' : 'copy'} is copied into it, then the other ${rows.length > 2 ? 'copies are' : 'copy is'} removed. Highlighted rows are where the copies differ.</p>
+      <div class="merge-grid" style="grid-template-columns:repeat(${rows.length}, minmax(220px, 1fr));">
+        ${rows.map((r, i) => `<div class="merge-col${i === keep ? ' keep' : ''}">
+          <label class="merge-pick"><input type="radio" name="merge-keep" value="${i}" ${i === keep ? 'checked' : ''}> ${i === keep ? '<b>Keep this one</b>' : 'Keep this one'}</label>
+          ${sums[i].map(([k, v], li) => `<div class="merge-line${differs[li] ? ' diff' : ''}"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}
+          <button class="btn btn-outline btn-sm merge-open" data-open-id="${esc(r.id)}" style="margin-top:8px; width:100%;">Open full record</button>
+        </div>`).join('')}
+      </div>
+      <label class="merge-reason">Reason <input type="text" id="merge-reason" value="Same household entered twice" maxlength="200"></label>
+      <button class="btn btn-primary btn-full" id="merge-go">Merge — keep household ${esc(sums[keep][0][1])} (${esc(sums[keep][3][1])}) and remove ${rows.length - 1} other${rows.length > 2 ? 's' : ''}</button>`;
+    $all('input[name="merge-keep"]', body).forEach((inp) => { inp.onchange = () => { keep = Number(inp.value); draw(); }; });
+    $all('.merge-open', body).forEach((b) => { b.onclick = () => { closeMergeDialog(); const rep = document.getElementById('llg-report'); if (rep && !rep.hidden) closeLlgReport(); openDetail(b.dataset.openId); }; });
+    $('#merge-go').onclick = async () => {
+      const keepRow = rows[keep]; const remove = rows.filter((_, i) => i !== keep).map((r) => r.id);
+      if (!confirm(`Keep household ${sums[keep][0][1]} (${sums[keep][3][1]}) and remove ${remove.length} other cop${remove.length > 1 ? 'ies' : 'y'}?\n\nA backup is kept and removed copies can be restored from Transfer → Deleted Records.`)) return;
+      const btn = $('#merge-go'); btn.disabled = true; btn.textContent = 'Merging…';
+      const { data: res, error: err } = await sb.rpc('merge_records', { p_keep: keepRow.id, p_remove: remove, p_reason: ($('#merge-reason').value || '').trim() });
+      if (err) { btn.disabled = false; draw(); toast(err.message && /HQ staff/.test(err.message) ? 'Only HQ staff can merge records' : 'Merge failed — check the connection and try again'); return; }
+      recordsCache = recordsCache.filter((x) => !remove.includes(x.id));
+      toast(`Merged — ${res && res.removed ? res.removed : remove.length} cop${remove.length > 1 ? 'ies' : 'y'} removed`);
+      closeMergeDialog();
+      if (opts.onDone) opts.onDone(keepRow.id);
+    };
+  };
+  draw();
+}
+async function openMergePicker(rec) {
+  const loc = rec.location || {};
+  const el = mergeDialog();
+  let scopeWard = true, list = [], q = '';
+  el.innerHTML = `<div class="dir-head"><div><div class="dir-title">Merge duplicate</div><div class="dir-scope">${esc(recordDisplayName(rec))} · ${esc(loc.ward || '')}, ${esc(loc.llg || '')}</div></div><button class="btn btn-outline dir-close" id="merge-close">Cancel</button></div><div class="dir-body"></div>`;
+  $('#merge-close').onclick = closeMergeDialog;
+  const body = el.querySelector('.dir-body');
+  const load = async () => {
+    body.innerHTML = skeletonRows(5);
+    try {
+      list = await fetchAllPaginated(() => {
+        let qb = sb.from('msme_records').select('id, household_no, ward, created_at, business_status, loc:data->location').eq('llg', loc.llg).is('deleted_at', null).neq('id', rec.id);
+        if (scopeWard && loc.ward) qb = qb.eq('ward', loc.ward);
+        return qb.order('id');
+      });
+    } catch (e) { body.innerHTML = `<div class="warn-box">${svgIcon('triangle-alert')} Couldn't load records. Check the connection.</div>`; return; }
+    draw();
+  };
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const myName = norm(loc.contactPerson);
+  const draw = () => {
+    const nq = norm(q);
+    let rows = list.filter((r) => !nq || norm([r.household_no, (r.loc || {}).contactPerson, (r.loc || {}).village, r.ward].join(' ')).includes(nq));
+    // likely matches first: same household number, then same name
+    const score = (r) => (String(r.household_no) === String(loc.householdNo) ? 2 : 0) + (myName && norm((r.loc || {}).contactPerson) === myName ? 1 : 0);
+    rows = rows.sort((x, y) => score(y) - score(x) || (Number(x.household_no) || 0) - (Number(y.household_no) || 0)).slice(0, 200);
+    body.innerHTML = `<p style="margin:0 0 8px; font-size:13px; color:var(--text-muted);">Pick the other copy of this household. Likely matches (same number or same name) are at the top.</p>
+      <div class="dir-tools"><input type="search" id="merge-q" class="dir-search" placeholder="Search name, household no., village…" value="${esc(q)}">
+      <div class="filter-chips"><button class="chip${scopeWard ? ' active' : ''}" data-scope="ward">This ward</button><button class="chip${!scopeWard ? ' active' : ''}" data-scope="llg">Whole LLG</button></div></div>
+      <div class="dir-group" style="margin-top:8px;"><ul class="dir-list" style="border-top:none;">${rows.length ? rows.map((r) => `<li class="dir-row" data-pick="${esc(r.id)}" tabindex="0" style="padding-left:14px;">
+        <div class="dir-main">HH ${esc(r.household_no || '—')} · ${esc((r.loc || {}).contactPerson || '(no name)')}${score(r) ? ' <span class="snap-flag">likely match</span>' : ''}</div>
+        <div class="dir-place">${esc([(r.loc || {}).village, r.ward].filter(Boolean).join(', '))} · entered ${esc(fmtPNG(r.created_at, false))}</div></li>`).join('') : '<li class="dir-row" style="padding-left:14px;">No records found.</li>'}</ul></div>`;
+    const s = $('#merge-q'); s.oninput = () => { q = s.value; const pos = s.selectionStart; draw(); const s2 = $('#merge-q'); s2.focus(); s2.setSelectionRange(pos, pos); };
+    $all('[data-scope]', body).forEach((b) => { b.onclick = () => { scopeWard = b.dataset.scope === 'ward'; load(); }; });
+    $all('[data-pick]', body).forEach((li) => { li.onclick = () => openMergeCompare([rec.id, li.dataset.pick], { onDone: (keepId) => openDetail(keepId) }); });
+  };
+  load();
 }
