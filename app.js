@@ -3984,10 +3984,11 @@ function drawSnapshot() {
     const old = new Date(iso).getTime() < weekAgo;
     return `<span class="${old ? 'snap-stale' : ''}" title="${esc(fmtPNG(iso))}">${esc(fmtPNG(iso, false))}</span>`;
   };
-  const head = `<tr><th>LLG</th><th>Reached</th><th>Households</th><th>Progress</th><th>Formal</th><th>Informal</th><th>This week</th><th>Last upload</th><th>Checks</th></tr>`;
+  const head = `<tr><th>LLG</th><th>Reached</th><th>Households</th><th>Progress</th><th>Formal</th><th>Informal</th><th>This week</th><th>Last upload</th><th>Checks</th><th class="no-print"></th></tr>`;
   const row = (r, cls, name) => `<tr class="${cls || ''}"${!cls ? ` data-snap-llg="${esc(r.llg)}" data-snap-district="${esc(r.district)}"` : ''}>
     <td class="${cls ? '' : 'llg'}">${name || esc(r.llg)}</td><td>${fmtNum(r.total)}</td><td>${fmtNum(r.households)}</td><td>${pctCell(r.total, r.households)}</td>
-    <td>${fmtNum(r.formal)}</td><td>${fmtNum(r.informal)}</td><td>${r.this_week ? fmtNum(r.this_week) : '—'}</td><td>${lastCell(r.last_uploaded)}</td><td>${checks(r)}</td></tr>`;
+    <td>${fmtNum(r.formal)}</td><td>${fmtNum(r.informal)}</td><td>${r.this_week ? fmtNum(r.this_week) : '—'}</td><td>${lastCell(r.last_uploaded)}</td><td>${checks(r)}</td>
+    <td class="no-print">${!cls ? `<button class="snap-rpt-btn" data-rpt-llg="${esc(r.llg)}" title="Open the report for ${esc(r.llg)}">Report</button>` : (cls === 'sub' && r.district ? `<button class="snap-rpt-btn" data-rpt-district="${esc(r.district)}" title="Print reports for every LLG in ${esc(r.district)}">All</button>` : '')}</td></tr>`;
 
   let html = `<div class="print-header"><div class="ph-row">
       <div class="ph-seal"><img src="logo.svg" alt="ENB logo"></div>
@@ -4006,6 +4007,7 @@ function drawSnapshot() {
       <button class="btn btn-outline" id="btn-snap-refresh">Refresh now</button>
       <button class="btn btn-outline" id="btn-snap-print">Print / Save as PDF</button>
       <button class="btn btn-outline" id="btn-snap-csv">Download CSV</button>
+      <button class="btn btn-primary" id="btn-snap-allrpt">All LLG reports (PDF)</button>
     </div>
     <div class="snap-kpis">
       <div class="snap-kpi"><div class="v">${fmtNum(P.total)}</div><div class="k">Households reached</div><div class="s">of ${fmtNum(P.households)} · ${pctOf(P.total, P.households)}%</div></div>
@@ -4025,7 +4027,7 @@ function drawSnapshot() {
       </tbody></table></div></div>`;
   });
   html += `<div class="snap-district"><h3>East New Britain Province</h3><div class="snap-wrap"><table class="snap-table"><thead>${head.replace('<th>LLG</th>', '<th>District</th>')}</thead><tbody>
-    ${groups.map((g) => { const T = sumRows(g.llgs); return row({ ...T }, 'sub', esc(g.district)); }).join('')}
+    ${groups.map((g) => { const T = sumRows(g.llgs); return row({ ...T, district: g.district }, 'sub', esc(g.district)); }).join('')}
     ${row(P, 'prov', 'Province total')}
     </tbody></table></div></div>
     <div class="snap-note">Reached = records at HQ after duplicate cleanup. Households = Division totals per LLG. Last upload in orange = nothing new for more than 7 days${stale ? ` (${stale} LLG${stale === 1 ? '' : 's'})` : ''}. ${notStarted.length ? `No records yet: ${esc(notStarted.join(', '))}. ` : ''}Checks: repeated = household numbers used more than once in a ward; gaps = numbers skipped within a ward. Tap an LLG to open its Summary.</div>`;
@@ -4036,8 +4038,11 @@ function drawSnapshot() {
   $('#btn-snap-csv').onclick = downloadSnapshotCSV;
   $all('[data-snap-llg]', c).forEach((tr) => {
     tr.classList.add('clickable');
-    tr.onclick = () => { stopSnapshotTimer(); goToSummary({ district: tr.dataset.snapDistrict, llg: tr.dataset.snapLlg }); };
+    tr.onclick = (e) => { if (e.target.closest('.snap-rpt-btn')) return; stopSnapshotTimer(); goToSummary({ district: tr.dataset.snapDistrict, llg: tr.dataset.snapLlg }); };
   });
+  $all('[data-rpt-llg]', c).forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openLlgReport(b.dataset.rptLlg); }; });
+  $all('[data-rpt-district]', c).forEach((b) => { b.onclick = (e) => { e.stopPropagation(); printAllLlgReports(b.dataset.rptDistrict); }; });
+  $('#btn-snap-allrpt').onclick = () => printAllLlgReports(null);
 }
 function downloadSnapshotCSV() {
   const groups = snapshotRows();
@@ -4133,4 +4138,181 @@ ${tables}${prov}
   const go = () => { if (printed) return; printed = true; try { w.focus(); w.print(); } catch (e) { window.print(); } };
   const img = w.document.querySelector('img');
   if (img && !img.complete) { img.onload = img.onerror = () => setTimeout(go, 50); setTimeout(go, 1500); } else setTimeout(go, 100);
+}
+
+/* ------------------------------ LLG reports ------------------------------ */
+// One report per LLG, built from the live figures with the date and time on it:
+// ward table, missing and repeated household numbers (with names so the BDO can
+// tell records apart), odd numbers, and a ready-to-send WhatsApp message.
+// The data comes from get_llg_report, which only answers signed-in HQ staff
+// (or a district account, for its own district) because it lists names.
+const RPT_CSS = `
+.rpt{font-family:Arial, Helvetica, sans-serif; color:#222; font-size:11px; background:#fff; line-height:1.35;}
+.rpt header{display:flex; align-items:center; gap:10px; border-bottom:2px solid #153F38; padding-bottom:8px; margin-bottom:10px;}
+.rpt header img{width:40px; height:40px;}
+.rpt .org{font-size:9px; text-transform:uppercase; letter-spacing:.04em; color:#666;}
+.rpt .t{font-size:16px; font-weight:bold; color:#0A231F;}
+.rpt .asof{font-size:11px; margin-top:2px;}
+.rpt .kpis{display:flex; gap:6px; margin:0 0 10px; flex-wrap:wrap;}
+.rpt .kpi{flex:1; min-width:110px; border:1px solid #ccc; border-radius:5px; padding:6px 8px;}
+.rpt .kpi b{display:block; font-size:15px; color:#0A231F;}
+.rpt .kpi span{color:#555; font-size:10px;}
+.rpt h3{font-size:12.5px; color:#0A231F; margin:14px 0 4px;}
+.rpt p.lead{margin:0 0 6px; color:#444;}
+.rpt table{width:100%; border-collapse:collapse;}
+.rpt th, .rpt td{border-bottom:1px solid #ddd; padding:3px 5px; text-align:left; vertical-align:top; font-size:10.5px;}
+.rpt th{font-size:9px; text-transform:uppercase; color:#555; border-bottom:1px solid #999;}
+.rpt td.num, .rpt th.num{text-align:right; white-space:nowrap;}
+.rpt tr.warn td{background:#FDF1DC;}
+.rpt tr.none td{color:#8A4A05;}
+.rpt .ok{color:#1E7B4B; font-weight:bold;}
+.rpt .muted{color:#777;}
+.rpt ul{margin:4px 0 0 16px; padding:0;}
+.rpt li{margin:2px 0;}
+.rpt .howto{border:1px solid #ccc; border-radius:5px; padding:8px 10px; margin-top:12px; font-size:10.5px;}
+.rpt .rpt-page{page-break-after:always; break-after:page;}
+.rpt .rpt-page:last-child{page-break-after:auto; break-after:auto;}
+`;
+function compressRanges(nums) {
+  const a = (nums || []).filter((x) => x != null).map(Number).sort((x, y) => x - y);
+  const out = []; let i = 0;
+  while (i < a.length) { let j = i; while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++; out.push(j > i + 1 ? `${a[i]}–${a[j]}` : j === i + 1 ? `${a[i]}, ${a[j]}` : `${a[i]}`); i = j + 1; }
+  return out.join(', ');
+}
+function llgReportModel(L, asOf) {
+  const official = WARDS_BY_LLG[L.llg] || [];
+  const byWard = {}; (L.wards || []).forEach((w) => { byWard[(w.ward || '').toLowerCase()] = w; });
+  const rows = official.map((name) => byWard[name.toLowerCase()] ? { ...byWard[name.toLowerCase()], ward: name } : { ward: name, records: 0, missing: [], max: null, last_upload: null });
+  (L.wards || []).forEach((w) => { if (!official.some((o) => o.toLowerCase() === (w.ward || '').toLowerCase())) rows.push({ ...w, ward: w.ward || '(no ward)', unofficial: true }); });
+  const repByWard = {};
+  (L.repeated || []).forEach((r) => { const k = r.ward || '(no ward)'; (repByWard[k] = repByWard[k] || {}); (repByWard[k][r.n] = repByWard[k][r.n] || []).push(r); });
+  rows.forEach((w) => { w.repeatedNums = Object.keys(repByWard[w.ward] || {}).map(Number).sort((x, y) => x - y); });
+  const households = LLG_HOUSEHOLDS[L.llg] || 0;
+  return { ...L, asOf, rows, repByWard, households, notStarted: rows.filter((w) => !w.records).map((w) => w.ward),
+    missingTotal: rows.reduce((s, w) => s + (w.missing || []).length, 0), repeatedTotal: (L.repeated || []).length };
+}
+function llgReportHTML(M) {
+  const pct = M.households ? Math.round((M.total / M.households) * 100) : null;
+  const wardRow = (w) => {
+    const miss = (w.missing || []).length ? compressRanges(w.missing) : '';
+    const rep = w.repeatedNums.length ? compressRanges(w.repeatedNums) : '';
+    const cls = !w.records ? 'none' : (miss || rep || (w.stray || []).length) ? 'warn' : '';
+    return `<tr class="${cls}"><td>${esc(w.ward)}${w.unofficial ? ' <span class="muted">(not on ward list)</span>' : ''}</td>
+      <td class="num">${w.records ? fmtNum(w.records) : '—'}</td><td class="num">${w.max ? `1–${w.max}` : '—'}</td>
+      <td>${!w.records ? 'Not started' : (miss || '<span class="ok">None</span>')}</td><td>${rep}</td>
+      <td class="num">${w.last_upload ? esc(fmtPNG(w.last_upload, false)) : '—'}</td></tr>`;
+  };
+  const repSections = Object.keys(M.repByWard).sort().map((ward) => {
+    const groups = M.repByWard[ward];
+    const items = Object.keys(groups).map(Number).sort((x, y) => x - y).map((n) => `<tr><td>${esc(ward)}</td><td class="num">${n}</td><td>${groups[n].map((r) => `${esc(r.name || '(no name)')} — ${esc(r.village || 'no village')}, entered ${esc(fmtPNG(r.entered, false).replace(/,.*$/, ''))}${r.hh !== String(n) ? ` (typed as “${esc(r.hh)}”)` : ''}`).join('<br>')}</td></tr>`).join('');
+    return items;
+  }).join('');
+  const odd = (M.odd_numbers || []).map((o) => `<tr><td>${esc(o.ward || '(no ward)')}</td><td>“${esc(o.hh || '(blank)')}”</td><td>${esc(o.name || '(no name)')} — ${esc(o.village || 'no village')}</td></tr>`).join('');
+  const stray = M.rows.filter((w) => (w.stray || []).length).map((w) => `<li>${esc(w.ward)}: ${w.stray.join(', ')} — much higher than the rest of the ward's numbers. Check if typed wrong.</li>`).join('');
+  return `<div class="rpt-page">
+<header><img src="${location.origin}${location.pathname.replace(/[^/]*$/, '')}logo.svg" alt=""><div>
+<div class="org">East New Britain Provincial Administration · Division of Commerce &amp; Industry</div>
+<div class="t">${esc(M.llg)} — Survey progress report</div>
+<div class="asof">${esc(M.district || '')} District · Figures as at <b>${esc(fmtPNG(M.asOf))}</b></div></div></header>
+<div class="kpis">
+<div class="kpi"><b>${fmtNum(M.total)}</b><span>Households at HQ${M.households ? ` of ${fmtNum(M.households)} · ${pct}%` : ''}</span></div>
+<div class="kpi"><b>${M.rows.filter((w) => w.records).length} of ${M.rows.length}</b><span>Wards with records</span></div>
+<div class="kpi"><b>${fmtNum(M.missingTotal)}</b><span>Missing household numbers</span></div>
+<div class="kpi"><b>${fmtNum(M.repeatedTotal)}</b><span>Records sharing a number</span></div>
+<div class="kpi"><b>${M.last_upload ? esc(fmtPNG(M.last_upload, false)) : '—'}</b><span>Last upload</span></div>
+</div>
+<h3>Ward by ward</h3>
+<table><thead><tr><th>Ward</th><th class="num">Records</th><th class="num">Numbers</th><th>Missing numbers</th><th>Used twice</th><th class="num">Last upload</th></tr></thead>
+<tbody>${M.rows.map(wardRow).join('')}</tbody></table>
+${repSections ? `<h3>Please check: household numbers used more than once</h3><p class="lead">If it is the same household entered twice, tell HQ which copy to remove. If they are different households, give one of them a new number.</p>
+<table><thead><tr><th>Ward</th><th class="num">No.</th><th>Records with this number</th></tr></thead><tbody>${repSections}</tbody></table>` : ''}
+${odd ? `<h3>Please check: household numbers typed wrong</h3><table><thead><tr><th>Ward</th><th>Entered as</th><th>Household</th></tr></thead><tbody>${odd}</tbody></table>` : ''}
+${stray ? `<h3>Please check: numbers far out of range</h3><ul>${stray}</ul>` : ''}
+${!repSections && !odd && !stray && !M.missingTotal ? '<p class="ok" style="margin-top:10px;">No missing, repeated or odd household numbers found.</p>' : ''}
+<div class="howto"><b>How to fix:</b> to correct a number or ward, open the record in the LLG app → Edit → correct it → Save → Transfer → Upload. If a record should be removed, don't delete it on the laptop (that doesn't remove it at HQ) — send the ward and number to HQ. After HQ makes changes, do Transfer → Resync all with HQ.</div>
+</div>`;
+}
+function llgReportMessage(M) {
+  const lines = [`${M.llg} survey update (as at ${fmtPNG(M.asOf)})`, '',
+    `HQ has ${fmtNum(M.total)} households${M.households ? ` of ${fmtNum(M.households)} (${Math.round((M.total / M.households) * 100)}%)` : ''}.`];
+  const miss = M.rows.filter((w) => w.records && (w.missing || []).length);
+  if (miss.length) { lines.push('', 'Missing household numbers:'); miss.forEach((w) => lines.push(`• ${w.ward}: ${compressRanges(w.missing)}`)); }
+  const rep = M.rows.filter((w) => w.repeatedNums.length);
+  if (rep.length) { lines.push('', 'Numbers used more than once (please check):'); rep.forEach((w) => lines.push(`• ${w.ward}: ${compressRanges(w.repeatedNums)}`)); }
+  if ((M.odd_numbers || []).length) { lines.push('', 'Household numbers typed wrong:'); M.odd_numbers.forEach((o) => lines.push(`• ${o.ward || '(no ward)'}: "${o.hh || ''}"${o.name ? ` (${o.name})` : ''}`)); }
+  if (M.notStarted.length) lines.push('', `No records yet: ${M.notStarted.join(', ')}.`);
+  if (!miss.length && !rep.length && !(M.odd_numbers || []).length) lines.push('', 'No missing or repeated household numbers. Well done.');
+  lines.push('', 'Full report attached. After HQ makes any changes, please do Transfer → Resync all with HQ. Thank you.');
+  return lines.join('\n');
+}
+function printReportDoc(title, bodyHTML) {
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait; margin:12mm;} body{margin:0;} *{-webkit-print-color-adjust:exact; print-color-adjust:exact; box-sizing:border-box;} ${RPT_CSS}</style></head><body><div class="rpt">${bodyHTML}</div></body></html>`;
+  const old = document.getElementById('rpt-print-frame'); if (old) old.remove();
+  const f = document.createElement('iframe');
+  f.id = 'rpt-print-frame'; f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:fixed; right:0; bottom:0; width:0; height:0; border:0; visibility:hidden;';
+  document.body.appendChild(f);
+  const w = f.contentWindow;
+  w.document.open(); w.document.write(doc); w.document.close();
+  let printed = false;
+  const go = () => { if (printed) return; printed = true; try { w.focus(); w.print(); } catch (e) { window.print(); } };
+  const img = w.document.querySelector('img');
+  if (img && !img.complete) { img.onload = img.onerror = () => setTimeout(go, 50); setTimeout(go, 1500); } else setTimeout(go, 100);
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {
+    const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed; opacity:0;'; document.body.appendChild(t); t.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e2) { ok = false; } t.remove(); return ok;
+  }
+}
+function ensureReportStyles() {
+  if (document.getElementById('rpt-styles')) return;
+  const s = document.createElement('style'); s.id = 'rpt-styles'; s.textContent = RPT_CSS; document.head.appendChild(s);
+}
+function closeLlgReport() {
+  const el = document.getElementById('llg-report'); if (el) { el.hidden = true; el.innerHTML = ''; }
+  document.body.classList.remove('dir-open');
+  document.removeEventListener('keydown', rptEsc);
+}
+function rptEsc(e) { if (e.key === 'Escape') closeLlgReport(); }
+async function openLlgReport(llg) {
+  ensureReportStyles();
+  let el = document.getElementById('llg-report');
+  if (!el) { el = document.createElement('div'); el.id = 'llg-report'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); document.body.appendChild(el); }
+  el.hidden = false; document.body.classList.add('dir-open'); document.addEventListener('keydown', rptEsc);
+  el.innerHTML = `<div class="dir-head"><div><div class="dir-title">${esc(llg)}</div><div class="dir-scope">Survey progress report</div></div><button class="btn btn-outline dir-close" id="rpt-close">Close</button></div>
+    <div class="dir-body">${skeletonRows(6)}</div>`;
+  $('#rpt-close').onclick = closeLlgReport;
+  const { data, error } = await rpcWithRetry('get_llg_report', { p_llg: llg });
+  if (el.hidden) return;
+  const body = el.querySelector('.dir-body');
+  if (error || !data) { body.innerHTML = `<div class="warn-box">${svgIcon('triangle-alert')} Couldn't load the report. Check the connection and try again.</div>`; return; }
+  const L = (data.llgs || [])[0] || { llg, district: Object.keys(LLG_BY_DISTRICT).find((d) => (LLG_BY_DISTRICT[d] || []).includes(llg)), total: 0, wards: [], repeated: [], odd_numbers: [] };
+  const M = llgReportModel(L, data.as_of);
+  const msg = llgReportMessage(M);
+  body.innerHTML = `<div class="dir-actions no-print" style="margin-bottom:12px;">
+      <button class="btn btn-primary" id="rpt-print">Print / Save as PDF</button>
+      <button class="btn btn-outline" id="rpt-copy">Copy WhatsApp message</button>
+      ${navigator.share ? '<button class="btn btn-outline" id="rpt-share">Share message</button>' : ''}
+    </div>
+    <div class="rpt rpt-sheet">${llgReportHTML(M)}</div>
+    <h3 style="margin:18px 0 6px; font-size:14px;">WhatsApp message</h3>
+    <pre class="rpt-msg">${esc(msg)}</pre>`;
+  $('#rpt-print').onclick = () => printReportDoc(`${llg} report ${fmtPNG(M.asOf, false)}`, llgReportHTML(M));
+  $('#rpt-copy').onclick = async () => toast((await copyText(msg)) ? 'Message copied — paste it into WhatsApp' : 'Could not copy — select the text and copy it');
+  const sh = $('#rpt-share'); if (sh) sh.onclick = () => navigator.share({ text: msg }).catch(() => {});
+}
+async function printAllLlgReports(district) {
+  ensureReportStyles();
+  toast(district ? `Preparing reports for ${district}…` : 'Preparing all LLG reports…');
+  const { data, error } = await rpcWithRetry('get_llg_report', { p_llg: null });
+  if (error || !data) { toast('Could not load the reports — check the connection'); return; }
+  const byLlg = {}; (data.llgs || []).forEach((L) => { byLlg[L.llg] = L; });
+  const ds = district ? [district] : DISTRICTS;
+  const pages = [];
+  ds.forEach((d) => (LLG_BY_DISTRICT[d] || []).forEach((llg) => {
+    const L = byLlg[llg] || { llg, district: d, total: 0, wards: [], repeated: [], odd_numbers: [] };
+    pages.push(llgReportHTML(llgReportModel({ ...L, district: L.district || d }, data.as_of)));
+  }));
+  printReportDoc(`${district ? district + ' District' : 'All'} LLG reports ${fmtPNG(data.as_of, false)}`, pages.join(''));
 }
